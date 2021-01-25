@@ -15,18 +15,18 @@ int main()
   Problem nlp;
   Eigen::VectorXd initValues(n_step * 4);
   initValues.setZero();
-  Eigen::VectorXd stateNominal(n_step*4), controlNominal(n_step*2);
+  Eigen::VectorXd stateNominal(n_step*4), controlNominal(n_step*3);
   for (int i = 0; i < n_step; ++i){
     stateNominal.segment(i*4, 4) << 0.05*i*0.03, 0,0,0;
     initValues.segment(i*4, 4) << 0.05*i*0.03, 0,0,0;
-    controlNominal.segment(i*2, 2) << 0.05, 0;
+    controlNominal.segment(i*3, 3) << 0.0, 0, 0;
   }
 
-  initValues.head(4) << -0.01, 0.0, 0.0, 0.0;
+  initValues.head(4) << 0.0, 0.1, 0.5, 0.0;
 
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initValues));
-  nlp.AddVariableSet(std::make_shared<ExVariables>(2*n_step, "control"));
-  nlp.AddConstraintSet(std::make_shared<ExConstraint>(4*3*(n_step-1)));
+  nlp.AddVariableSet(std::make_shared<ExVariables>(3*n_step, "control"));
+  nlp.AddConstraintSet(std::make_shared<ExConstraint>(8*(n_step-1)));
   nlp.AddCostSet(std::make_shared<ExCost>("cost", stateNominal, controlNominal));
 
   nlp.PrintCurrent();
@@ -38,9 +38,9 @@ int main()
 
   Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
   Eigen::Map<Eigen::MatrixXd> state(variables.segment(0, 4 * n_step).data(), 4, n_step);
-  Eigen::Map<Eigen::MatrixXd> control(variables.segment(4 * n_step, 2 * n_step).data(), 2, n_step);
+  Eigen::Map<Eigen::MatrixXd> control(variables.segment(4 * n_step, 3 * n_step).data(), 3, n_step);
 
-  // std::cout.precision(5);
+  std::cout.precision(5);
 
   std::cout << "state: \n" << state << "\n";
   std::cout << "control: \n" << control << "\n";

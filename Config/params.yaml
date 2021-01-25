@@ -4,11 +4,11 @@ mu_g: 0.35
 m: 1.05
 length: 0.09 # along x direction 
 width: 0.09 # along y direction
-mMax: 0.124 # numerical integrated
+mMax: 0.12413997 # numerical integrated
 
 # params for MPC
 n_step: 35
 t_step: 0.03
-QFinal: 200.0
+QFinal: 2000.0
 Q: 10.0
 R: 0.5

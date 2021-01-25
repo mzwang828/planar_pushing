@@ -2,6 +2,7 @@
 #include <fstream>
 #include <ifopt/problem.h>
 #include <ifopt/snopt_solver.h>
+#include <ifopt/ipopt_solver.h>
 #include "pusher/problemd.h"
 #include <yaml-cpp/yaml.h>
 
@@ -22,13 +23,13 @@ int main()
     initStates.segment(i*4, 4) << 0.05*i*0.03, 0,0,0;
     controlNominal.segment(i*2, 2) << 0.05, 0;
   }
-  initStates.head(4) << -0.01, 0, 0, 0;
+  initStates.head(4) << -0.0, 0.01, 15*3.14/180, 0;
 
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initStates));
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "stateDot2"));
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "stateDot3"));
   nlp.AddVariableSet(std::make_shared<ExVariables>(2*n_step, "control"));
-  nlp.AddConstraintSet(std::make_shared<ExConstraint>(4*3*(n_step-1)));
+  nlp.AddConstraintSet(std::make_shared<ExConstraint>(4*5*(n_step-1)));
 
   nlp.AddCostSet(std::make_shared<ExCost>("cost", stateNominal, controlNominal));
 
@@ -36,6 +37,13 @@ int main()
 
   SnoptSolver solver;
   solver.Solve(nlp);
+
+  // IpoptSolver solver;  
+  // solver.SetOption("linear_solver", "mumps");
+  // solver.SetOption("jacobian_approximation", "finite-difference-values");
+  // solver.SetOption("max_cpu_time", 1e6);
+  // solver.SetOption("max_iter", 30000);  
+  // solver.Solve(nlp);
 
   nlp.PrintCurrent();
 
