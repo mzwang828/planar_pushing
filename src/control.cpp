@@ -23,19 +23,36 @@ public:
         mu = params["mu"].as<double>();
         muGround = params["mu_g"].as<double>();
         m = params["m"].as<double>();
-        px = params["length"].as<double>() / 2.0;
+        xC = -params["length"].as<double>() / 2.0;
         mMax = params["mMax"].as<double>();
         fMax = muGround * m * 9.81;
         c = fMax/mMax;
+        MPCSteps = params["n_step"].as<int>();
+        tStep = params["t_step"].as<double>();
+
+        J.resize(2,3); 
+        B.resize(3,2); 
+        L.resize(3,3);
+        L << 2/(fMax*fMax), 0, 0,
+             0, 2/(fMax*fMax), 0,
+             0, 0, 2/(mMax*mMax);
+        
+        state.resize(4*MPCSteps);
+        control.resize(3*MPCSteps);
+        for (int i = 0; i < MPCSteps; ++i) {
+            state.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
+            control.segment(i*3, 3) << 0.3, 0.0, 0.0;
+        }
+
+        timer1 = nh.createTimer(ros::Duration(tStep), &Control::findSolution, this);
     }
 
     void pusherOdomCallback(const nav_msgs::Odometry &msg) 
     {
         double xSliderToPusher = msg.pose.pose.position.x - sliderPose.x;
         double ySliderToPusher = msg.pose.pose.position.y - sliderPose.y;
-        py = -sin(sliderPose.theta) * xSliderToPusher + cos(sliderPose.theta) * ySliderToPusher;
-        yt = (mu*c*c - px*py + mu*px*px)/(c*c + py*py - mu*px*py);
-        yb = (-mu*c*c - px*py - mu*px*px)/(c*c + py*py + mu*px*py);
+        yC = -sin(sliderPose.theta) * xSliderToPusher + cos(sliderPose.theta) * ySliderToPusher;
+        phi = atan(-yC/xC);
     }
 
     void sliderOdomCallback(const nav_msgs::Odometry &msg) 
@@ -46,51 +63,123 @@ public:
         tf::poseMsgToTF(msg.pose.pose, pose);
         sliderPose.theta = tf::getYaw(pose.getRotation());
     }
-
-    void findSolution(const Eigen::VectorXd &stateIn, const Eigen::VectorXd &controlIn, int MPCSteps)
+    
+    /**
+     * Pass in initial guess state and control, the nominal state and control and solve the problem
+     **/
+    void findSolution(const ros::TimerEvent&)
     {
-        ifopt::Problem nlp;
-        Eigen::VectorXd initState = stateIn;
-        initState.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, py;
-        nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", initState));
-        nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(2*MPCSteps, "control", controlIn));
-        nlp.AddConstraintSet(std::make_shared<ifopt::ExConstraint>(4*3*(MPCSteps-1)));
-        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", initState, controlIn));
+        // straight line
+        Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal(MPCSteps*3);
+        for (int i = 0; i < MPCSteps; ++i){
+            stateNominal.segment(i*4, 4) << sliderPose.x + 0.05*i*tStep, 0,0,0;
+            controlNominal.segment(i*3, 3) << 0.3, 0.0, 0.0;
+        }
+        
+        Eigen::VectorXd stateInit = stateNominal;
+        stateInit.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        state.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        std::cout << sliderPose.x << ", " << sliderPose.y << ", " << sliderPose.theta << ", " << phi << "\n";
 
-        ifopt::SnoptSolver solver;
+        ifopt::Problem nlp;
+        nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
+        nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(3*MPCSteps, "control", control));
+        nlp.AddConstraintSet(std::make_shared<ifopt::ExConstraint>(10*(MPCSteps-1)));
+        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, controlNominal));
+
         solver.Solve(nlp);
         Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
-        Eigen::Map<Eigen::MatrixXd> state(variables.segment(0, 4 * MPCSteps).data(), 4, MPCSteps);
-        Eigen::Map<Eigen::MatrixXd> control(variables.segment(4 * MPCSteps, 2 * MPCSteps).data(), 2, MPCSteps);
-        
+
+        state = variables.segment(0, 4 * MPCSteps);
+        control = variables.segment(4 * MPCSteps, 3 * MPCSteps);
+
         // convert pusher velocity from slider frame to world frame
-        geometry_msgs::Twist pusherVel;
-        pusherVel.linear.x = cos(sliderPose.theta) * control(0,0) - sin(sliderPose.theta) * control(1,0);
-        pusherVel.linear.y = sin(sliderPose.theta) * control(0,0) + cos(sliderPose.theta) * control(1,0);
+        geometry_msgs::Twist pusherVel, zeroVel;
+        zeroVel.linear.x = 0.0;
+        zeroVel.linear.y = 0.0;
+
+        J << 1, 0, -yC,
+            0, 1, xC;
+        B.col(0) = J.transpose() * Eigen::Vector2d(1, 0);
+        B.col(1) = J.transpose() * Eigen::Vector2d(0, 1);
+        Eigen::MatrixXd Gc(2,3);
+        Gc.setZero();
+        Gc.leftCols(2) = J * L * B;
+        Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
+        Eigen::Vector2d vPusher = Gc * control.segment(3, 3);
+        if (vPusher(0) > 0.2){
+            vPusher(0) = 0.2;
+        }
+        if (vPusher(1) > 0.2){
+            vPusher(1) = 0.2;
+        } else if (vPusher(1) < -0.2){
+            vPusher(1) = -0.2;
+        }
+        pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
+        pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
+
+        std::cout << control(3) << ", " << control(4) << ", " << control(5) << "\n";
+        std::cout << "J : \n" << J << "\n"; 
+        std::cout << "Gc : \n" << Gc << "\n";
+        std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
+        std::cout << "---------\n";
+
         pusherVelPub.publish(pusherVel);
     }
 
-    // for test use
-    void straightLine()
-    {
-        int MPCSteps = 35;
-        Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal(MPCSteps*2);
-        for (int i = 0; i < MPCSteps; ++i){
-            stateNominal.segment(i*4, 4) << sliderPose.x + 0.05*i*0.03, 0,0,0;
-            controlNominal.segment(i*2, 2) << 0.05, 0;
-        }
+    // void straightLine(const ros::TimerEvent&)
+    // {
+    //     Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal(MPCSteps*3);
+    //     for (int i = 0; i < MPCSteps; ++i){
+    //         stateNominal.segment(i*4, 4) << sliderPose.x + 0.05*i*tStep, 0,0,0;
+    //         controlNominal.segment(i*3, 3) << 0.3, 0.0, 0.0;
+    //     }
 
-        this->findSolution(stateNominal, controlNominal, MPCSteps);
-    }
+    //     this->findSolution(state, control, stateNominal, controlNominal);
+
+    //     // convert pusher velocity from slider frame to world frame
+    //     geometry_msgs::Twist pusherVel, zeroVel;
+    //     zeroVel.linear.x = 0.0;
+    //     zeroVel.linear.y = 0.0;
+
+    //     J << 1, 0, -yC,
+    //         0, 1, xC;
+    //     B.col(0) = J.transpose() * Eigen::Vector2d(1, 0);
+    //     B.col(1) = J.transpose() * Eigen::Vector2d(0, 1);
+    //     Eigen::MatrixXd Gc(2,3);
+    //     Gc.leftCols(2) = J * L * B;
+    //     Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
+    //     Eigen::Vector2d vPusher = Gc * control.segment(3, 3);
+    //     pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
+    //     pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
+
+    //     std::cout << control(3) << ", " << control(4) << ", " << control(5) << "\n";
+    //     std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
+    //     std::cout << "---------\n";
+    //     // getchar();
+
+    //     pusherVelPub.publish(pusherVel);
+    //     // ros::Duration(tStep).sleep();
+    //     // pusherVelPub.publish(zeroVel);
+    // }
 
 private:
     ros::NodeHandle nh;
     ros::Subscriber sliderOdomSub, pusherOdomSub;
     ros::Publisher pusherVelPub;
+    ros::Timer timer1;
 
     geometry_msgs::Pose2D sliderPose;
-    double px, py, fMax, mMax, c, mu, m, muGround;
-    double yt, yb;
+    double xC, yC, phi, fMax, mMax, c, mu, m, muGround;
+    int MPCSteps;
+    double tStep;
+
+    Eigen::VectorXd state, control;
+    
+    // Used to map force to velocity
+    Eigen::MatrixXd J, L, B;
+
+    ifopt::SnoptSolver solver;
 };
 
 main(int argc, char *argv[])
@@ -99,6 +188,8 @@ main(int argc, char *argv[])
     ros::NodeHandle n("~");
     Control control(n);
 
-    ros::spin();
+    ros::AsyncSpinner spinner(4);
+    spinner.start();
+    ros::waitForShutdown();
     return 0;
 }

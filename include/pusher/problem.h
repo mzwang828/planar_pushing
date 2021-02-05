@@ -33,7 +33,7 @@ namespace ifopt
       }
     }
 
-    ExVariables(int n, const std::string &name, const Eigen::VectorXd &initValues) : ExVariables(n, name) 
+    ExVariables(int n, const std::string &name, const Eigen::VectorXd &initValues) : VariableSet(n, name) 
     {
       xvar = Eigen::VectorXd::Zero(n);
       xvar = initValues;
@@ -66,15 +66,15 @@ namespace ifopt
       {
         for (int i = 0; i < GetRows()/4; i++)
         {
-          bounds.at(i*4) = Bounds(-1.0, 1.0);
+          bounds.at(i*4) = Bounds(-1.0, 10.0);
           bounds.at(i*4 + 1) = Bounds(-1.0, 1.0);
           bounds.at(i*4 + 2) = Bounds(-3.14, 3.14);
-          bounds.at(i*4 + 3) = Bounds(-0.46, 0.46);
+          bounds.at(i*4 + 3) = Bounds(-0.40, 0.40);
         }
         bounds.at(0) = Bounds(x0[0], x0[0]);
         bounds.at(1) = Bounds(x0[1], x0[1]);
         bounds.at(2) = Bounds(x0[2], x0[2]);
-        bounds.at(3) = Bounds(x0[3], x0[3]);    
+        bounds.at(3) = Bounds(x0[3], x0[3]);
       }
       else if (GetName() == "control")
       {
@@ -112,6 +112,11 @@ namespace ifopt
       c = fMax / mMax;
       nStep = params["n_step"].as<int>();  
       t_step = params["t_step"].as<double>();
+      
+      L << 2/(fMax*fMax), 0, 0,
+            0, 2/(fMax*fMax), 0,
+            0, 0, 2/(mMax*mMax);
+      
     }
 
     // The constraint value minus the constant value "1", moved to bounds.
@@ -128,14 +133,10 @@ namespace ifopt
         double yC = - xC * tan(phi);
         double pdot = control(3*i+2);
 
-        Eigen::Matrix3d R, L;
+        Eigen::Matrix3d R;
         R << cos(theta), -sin(theta), 0,
              sin(theta), cos(theta), 0,
              0, 0, 1;
-
-        L << fMax, 0, 0,
-             0, fMax, 0,
-             0, 0, mMax;
 
         Eigen::MatrixXd J(2,3), B(3,2);
         J << 1, 0, -yC,
@@ -145,7 +146,7 @@ namespace ifopt
         B.col(1) = J.transpose() * Eigen::Vector2d(0, 1);
 
 
-        Eigen::MatrixXd dynamics(4, 3);
+        Eigen::MatrixXd dynamics(4, 3), ddynamicsdTheta(4, 3), ddynamicsdPhi(4, 3);;
         dynamics.setZero();
         dynamics.topLeftCorner(3,2) = R*L*B;
         dynamics(3,2) = 1;
@@ -164,12 +165,12 @@ namespace ifopt
         g(7 * (nStep - 1) + i - 1) = control(3 * i + 1) + mu * control(3 * i);
 
         // constraints for the pusher vel, v_n and v_t
-        // Eigen::MatrixXd Gc(2,3);
-        // Gc.leftCols(2) = J * L * B;
-        // Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
-        // Eigen::Vector2d vPusher = Gc * control.segment(3*i, 3);
-        // g(8 * (nStep - 1) + i - 1) = vPusher(0);   // normal velocity
-        // g(9 * (nStep - 1) + i - 1) = vPusher(1);   // tangential velocity
+        Eigen::MatrixXd Gc(2,3), dGcdPhi(2,3);;
+        Gc.leftCols(2) = J * L * B;
+        Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
+        Eigen::Vector2d vPusher = Gc * control.segment(3*i, 3);
+        g(8 * (nStep - 1) + i - 1) = vPusher(0);   // normal velocity
+        g(9 * (nStep - 1) + i - 1) = vPusher(1);   // tangential velocity
       }
       return g;
     };
@@ -186,8 +187,8 @@ namespace ifopt
       for (int i = 0; i < nStep - 1; ++i){
         bounds.at(6*(nStep - 1)+i) = Bounds(-inf, 0.0);
         bounds.at(7*(nStep - 1)+i) = Bounds(0.0, inf);
-        // bounds.at(8*(nStep - 1)+i) = Bounds(-0.3, 0.3);
-        // bounds.at(9*(nStep - 1)+i) = Bounds(-0.3, 0.3);
+        bounds.at(8*(nStep - 1)+i) = Bounds(-0.3, 0.3);
+        bounds.at(9*(nStep - 1)+i) = Bounds(-0.3, 0.3);
       }
       return bounds;
     }
@@ -210,14 +211,10 @@ namespace ifopt
         double yC = -xC * tan(phi);
         double pdot = control(3 * i + 2);
 
-        Eigen::Matrix3d R, L;
+        Eigen::Matrix3d R;
         R << cos(theta), -sin(theta), 0,
             sin(theta), cos(theta), 0,
             0, 0, 1;
-
-        L << fMax, 0, 0,
-            0, fMax, 0,
-            0, 0, mMax;
 
         Eigen::MatrixXd J(2, 3), B(3, 2);
         J << 1, 0, -yC,
@@ -267,8 +264,8 @@ namespace ifopt
             // regarding phi
             tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 3, (-ddynamicsdPhi * control.segment(3 * i, 3) * t_step)(j)));
           }
-          // tripletState.push_back(T(8 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(0)));
-          // tripletState.push_back(T(9 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(1)));
+          tripletState.push_back(T(8 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(0)));
+          tripletState.push_back(T(9 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(1)));
         }
         else if (var_set == "control")
         {
@@ -292,12 +289,12 @@ namespace ifopt
           tripletControl.push_back(T(7 * (nStep - 1) + i - 1, 3 * i, mu));
           tripletControl.push_back(T(7 * (nStep - 1) + i - 1, 3 * i + 1, 1));
           // pusher velocity
-          // tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i, Gc(0,0)));
-          // tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i+1, Gc(0,1)));
-          // tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i+2, Gc(0,2)));
-          // tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i, Gc(1,0)));
-          // tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i+1, Gc(1,1)));
-          // tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i+2, Gc(1,2)));
+          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i, Gc(0,0)));
+          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i+1, Gc(0,1)));
+          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i+2, Gc(0,2)));
+          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i, Gc(1,0)));
+          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i+1, Gc(1,1)));
+          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i+2, Gc(1,2)));
         }
       }
       if (var_set == "state")
@@ -312,6 +309,9 @@ namespace ifopt
 
   private:
     double xC, fMax, mMax, c, mu, m, muGround, t_step;
+
+    Eigen::Matrix3d L;
+
     int nStep;
   };
 
