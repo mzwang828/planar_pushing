@@ -66,7 +66,7 @@ namespace ifopt
       {
         for (int i = 0; i < GetRows()/4; i++)
         {
-          bounds.at(i*4) = Bounds(-1.0, 10.0);
+          bounds.at(i*4) = Bounds(-10.0, 10.0);
           bounds.at(i*4 + 1) = Bounds(-1.0, 1.0);
           bounds.at(i*4 + 2) = Bounds(-3.14, 3.14);
           bounds.at(i*4 + 3) = Bounds(-0.40, 0.40);

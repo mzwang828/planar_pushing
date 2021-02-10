@@ -43,8 +43,12 @@ public:
             state.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
             control.segment(i*3, 3) << 0.3, 0.0, 0.0;
         }
+        
+        // circular tracking
+        radius = 0.20;
+        alphaDot = 0.05/(2*3.14*radius);
 
-        timer1 = nh.createTimer(ros::Duration(tStep), &Control::findSolution, this);
+        timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
     }
 
     void pusherOdomCallback(const nav_msgs::Odometry &msg) 
@@ -69,17 +73,27 @@ public:
      **/
     void findSolution(const ros::TimerEvent&)
     {
-        // straight line
         Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal(MPCSteps*3);
+
+        // straight line
         for (int i = 0; i < MPCSteps; ++i){
             stateNominal.segment(i*4, 4) << sliderPose.x + 0.05*i*tStep, 0,0,0;
-            controlNominal.segment(i*3, 3) << 0.3, 0.0, 0.0;
+            controlNominal.segment(i*3, 3) << 0.0, 0.0, 0.0;
         }
+
+        // circular
+        // double alpha = atan2(sliderPose.x, radius - sliderPose.y);
+        // for (int i = 0; i < MPCSteps; ++i){
+        //     stateNominal.segment(i*4, 4) << radius*sin(alpha + alphaDot*i*tStep), radius - radius*cos(alpha + alphaDot*i*tStep), alpha, 0;
+        //     controlNominal.segment(i*3, 3) << 0.3, 0.0, 0.0;
+        // }
         
         Eigen::VectorXd stateInit = stateNominal;
         stateInit.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
         state.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+
         std::cout << sliderPose.x << ", " << sliderPose.y << ", " << sliderPose.theta << ", " << phi << "\n";
+        std::cout << stateNominal.tail(4).transpose() << "\n";
 
         ifopt::Problem nlp;
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
@@ -89,14 +103,12 @@ public:
 
         solver.Solve(nlp);
         Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
-
+        
         state = variables.segment(0, 4 * MPCSteps);
         control = variables.segment(4 * MPCSteps, 3 * MPCSteps);
 
         // convert pusher velocity from slider frame to world frame
-        geometry_msgs::Twist pusherVel, zeroVel;
-        zeroVel.linear.x = 0.0;
-        zeroVel.linear.y = 0.0;
+        geometry_msgs::Twist pusherVel;
 
         J << 1, 0, -yC,
             0, 1, xC;
@@ -118,10 +130,9 @@ public:
         pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
         pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
 
-        std::cout << control(3) << ", " << control(4) << ", " << control(5) << "\n";
-        std::cout << "J : \n" << J << "\n"; 
-        std::cout << "Gc : \n" << Gc << "\n";
-        std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
+        // std::cout << control(3) << ", " << control(4) << ", " << control(5) << "\n";
+        // std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
+        // std::cout << alpha << ", " << alpha + alphaDot*19*tStep << ", " << sliderPose.theta << "\n";
         std::cout << "---------\n";
 
         pusherVelPub.publish(pusherVel);
@@ -173,6 +184,8 @@ private:
     double xC, yC, phi, fMax, mMax, c, mu, m, muGround;
     int MPCSteps;
     double tStep;
+    double radius;
+    double alphaDot;
 
     Eigen::VectorXd state, control;
     

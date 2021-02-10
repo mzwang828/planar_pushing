@@ -20,10 +20,10 @@ int main()
   for (int i = 0; i < n_step; ++i){
     stateNominal.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
     initValues.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
-    controlNominal.segment(i*3, 3) << 0.3, 0, 0;
+    controlNominal.segment(i*3, 3) << 0, 0, 0;
   }
 
-  initValues.head(4) << 0, 0, 0, 0;
+  initValues.head(4) << 0.0, 0.02, 0, 0;
 
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initValues));
   nlp.AddVariableSet(std::make_shared<ExVariables>(3*n_step, "control", controlNominal));
