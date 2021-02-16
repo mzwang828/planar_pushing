@@ -111,7 +111,7 @@ namespace ifopt
       fMax = muGround * m * 9.81;
       c = fMax / mMax;
       nStep = params["n_step"].as<int>();  
-      t_step = params["t_step"].as<double>();
+      tStep = params["t_step"].as<double>();
       
       L << 2/(fMax*fMax), 0, 0,
             0, 2/(fMax*fMax), 0,
@@ -153,7 +153,7 @@ namespace ifopt
 
 
         g.segment(4 * (i - 1), 4) = (state.segment(4 * i, 4) - state.segment(4 * (i - 1), 4) -
-                                     dynamics * control.segment(3*i, 3) * t_step);
+                                     dynamics * control.segment(3*i, 3) * tStep);
 
         // up
         g(4 * (nStep - 1) + i - 1) = -std::min(-pdot, 0.0) * (control(3 * i + 1) - mu * control(3 * i));
@@ -187,8 +187,8 @@ namespace ifopt
       for (int i = 0; i < nStep - 1; ++i){
         bounds.at(6*(nStep - 1)+i) = Bounds(-inf, 0.0);
         bounds.at(7*(nStep - 1)+i) = Bounds(0.0, inf);
-        bounds.at(8*(nStep - 1)+i) = Bounds(-0.3, 0.3);
-        bounds.at(9*(nStep - 1)+i) = Bounds(-0.3, 0.3);
+        bounds.at(8*(nStep - 1)+i) = Bounds(0.0, 0.2);
+        bounds.at(9*(nStep - 1)+i) = Bounds(-0.1, 0.1);
       }
       return bounds;
     }
@@ -260,9 +260,9 @@ namespace ifopt
             tripletState.push_back(T(4 * (i - 1) + j, 4 * i + j, 1));
             tripletState.push_back(T(4 * (i - 1) + j, 4 * (i - 1) + j, -1));
             // regarding theta
-            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 2, (-ddynamicsdTheta * control.segment(3 * i, 3) * t_step)(j)));
+            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 2, (-ddynamicsdTheta * control.segment(3 * i, 3) * tStep)(j)));
             // regarding phi
-            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 3, (-ddynamicsdPhi * control.segment(3 * i, 3) * t_step)(j)));
+            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 3, (-ddynamicsdPhi * control.segment(3 * i, 3) * tStep)(j)));
           }
           tripletState.push_back(T(8 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(0)));
           tripletState.push_back(T(9 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(1)));
@@ -271,9 +271,9 @@ namespace ifopt
         {
           for (int j = 0; j < 4; ++j)
           {
-            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i, -dynamics(j, 0) * t_step));
-            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i + 1, -dynamics(j, 1) * t_step));
-            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i + 2, -dynamics(j, 2) * t_step));
+            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i, -dynamics(j, 0) * tStep));
+            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i + 1, -dynamics(j, 1) * tStep));
+            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i + 2, -dynamics(j, 2) * tStep));
           }
           // up
           tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * i, std::min(-pdot, 0.0) * mu));
@@ -308,7 +308,7 @@ namespace ifopt
     }
 
   private:
-    double xC, fMax, mMax, c, mu, m, muGround, t_step;
+    double xC, fMax, mMax, c, mu, m, muGround, tStep;
 
     Eigen::Matrix3d L;
 

@@ -3,6 +3,7 @@
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/Pose2D.h>
 #include <tf/transform_datatypes.h>
+#include <nav_msgs/Path.h>
 
 #include <yaml-cpp/yaml.h>
 #include <math.h>
@@ -19,6 +20,8 @@ public:
         pusherOdomSub = nh.subscribe("/odom/pusher", 1, &Control::pusherOdomCallback, this);
         sliderOdomSub = nh.subscribe("/odom/slider", 1, &Control::sliderOdomCallback, this);
         pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
+        pathNomiPub = nh.advertise<nav_msgs::Path>("/path/nominal", 10);
+        pathMPCPub = nh.advertise<nav_msgs::Path>("/path/mpc", 10);
 
         YAML::Node params = YAML::LoadFile("/home/mzwang/qsp_ws/src/pusher/Config/params.yaml");
         mu = params["mu"].as<double>();
@@ -30,6 +33,7 @@ public:
         c = fMax/mMax;
         MPCSteps = params["n_step"].as<int>();
         tStep = params["t_step"].as<double>();
+        debugInfo = params["debug_info"].as<bool>();
 
         J.resize(2,3); 
         B.resize(3,2); 
@@ -49,27 +53,23 @@ public:
 
         // define the nominal trajectory
         float targetLV = 0.05;
-        lineNomi.resize(16000);
+        lineNomi.resize(int(4*10/(targetLV*tStep))+4);
         for (int i = 0; i < 10/(targetLV*tStep); ++i){
             lineNomi.segment(i*4, 4) << targetLV*i*tStep, 0, 0, 0;
         }
+        lineNomi.tail(4) << 10, 0, 0, 0;
 
         // circular tracking
         radius = 0.16;
-        float targetAV = 0.3;
-        int nPointsPi = 3.14/(targetAV*tStep) + 1;        
+        float targetAV = 0.2;
+        int nPointsPi = 3.14/(targetAV*tStep);        
         eightNomi.resize(nPointsPi*4*4);
-        for (int i = 0; i < nPointsPi-1; ++i){
+        for (int i = 0; i < nPointsPi; ++i){
             eightNomi.segment(i*4, 4) << radius * sin(targetAV*i*tStep), radius - radius*cos(targetAV*i*tStep), targetAV*i*tStep, 0;
             eightNomi.segment(4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), 3*radius - radius*cos(targetAV*i*tStep), 3.14 - targetAV*i*tStep, 0;
             eightNomi.segment(2*4*nPointsPi + i*4, 4) << radius * sin(targetAV*i*tStep), 3*radius + radius*cos(targetAV*i*tStep), - targetAV*i*tStep, 0;
             eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
         }
-        eightNomi.segment((nPointsPi-1)*4, 4) << 0, 2*radius, 3.14, 0;
-        eightNomi.segment((2*nPointsPi-1)*4, 4) << 0, 4*radius, 0, 0;
-        eightNomi.segment((3*nPointsPi-1)*4, 4) << 0, 2*radius, -3.14, 0;
-        eightNomi.segment((4*nPointsPi-1)*4, 4) << 0, 0, 0, 0;
-
 
         timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
     }
@@ -88,11 +88,15 @@ public:
         sliderPose.y = msg.pose.pose.position.y;
         tf::Pose pose;
         tf::poseMsgToTF(msg.pose.pose, pose);
-        sliderPose.theta = tf::getYaw(pose.getRotation());
+        float newTheta = tf::getYaw(pose.getRotation());
+        if (abs(newTheta - sliderPose.theta) < 6){
+            sliderPose.theta = newTheta;
+        }
     }
     
     void findSolution(const ros::TimerEvent&)
     {
+        
         Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal(MPCSteps*3);
 
         // straight line
@@ -101,6 +105,9 @@ public:
             controlNominal.segment(i*3, 3) << 0.0, 0.0, 0.0;
         }
         // stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
+        if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
+            stepCounter = 0;
+        }
         stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
 
         // circular
@@ -113,9 +120,6 @@ public:
         stateNominal.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
         state.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
 
-        std::cout << sliderPose.x << ", " << sliderPose.y << ", " << sliderPose.theta << ", " << phi << "\n";
-        std::cout << stateNominal.tail(4).transpose() << "\n";
-
         ifopt::Problem nlp;
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(3*MPCSteps, "control", control));
@@ -123,6 +127,7 @@ public:
         nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, controlNominal));
 
         solver.Solve(nlp);
+
         Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
         
         state = variables.segment(0, 4 * MPCSteps);
@@ -151,10 +156,43 @@ public:
         pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
         pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
 
-        // std::cout << control(3) << ", " << control(4) << ", " << control(5) << "\n";
-        // std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
-        // std::cout << alpha << ", " << alpha + alphaDot*19*tStep << ", " << sliderPose.theta << "\n";
+        // if not solved, reset control and state
+        int status = solver.GetReturnStatus();
+        if (status != 1){
+            control.setZero();
+        }
+
         std::cout << "---------\n";
+
+        // DEBUG
+        if (debugInfo){
+            nlp.PrintCurrent();
+            nav_msgs::Path pathNomi, pathMPC;
+            // pathNomi.header.stamp = ros::Time::now();
+            pathNomi.header.frame_id = "world";
+            // pathMPC.header.stamp = ros::Time::now();
+            pathMPC.header.frame_id = "world";
+
+            geometry_msgs::PoseStamped pose;
+            pose.header.frame_id = "world";
+            for (int i = 0; i < MPCSteps; ++i){
+                pose.pose.position.x = stateNominal(i*4);
+                pose.pose.position.y = stateNominal(i*4+1);
+                pathNomi.poses.push_back(pose);
+            }
+
+            for (int i = 0; i < MPCSteps; ++i){
+                pose.pose.position.x = state(i*4);
+                pose.pose.position.y = state(i*4+1);
+                pathMPC.poses.push_back(pose);
+            }
+
+            pathNomiPub.publish(pathNomi);
+            pathMPCPub.publish(pathMPC);
+        }
+        std::cout << stateNominal.tail(4).transpose() << "\n";
+        std::cout << sliderPose.theta << "\n";
+        std::cout << state.tail(4).transpose() << "\n";
 
         ++stepCounter;
         pusherVelPub.publish(pusherVel);
@@ -163,7 +201,7 @@ public:
 private:
     ros::NodeHandle nh;
     ros::Subscriber sliderOdomSub, pusherOdomSub;
-    ros::Publisher pusherVelPub;
+    ros::Publisher pusherVelPub, pathNomiPub, pathMPCPub;
     ros::Timer timer1;
 
     geometry_msgs::Pose2D sliderPose;
@@ -172,6 +210,7 @@ private:
     double tStep;
     double radius;
     double alphaDot;
+    bool debugInfo;
 
     Eigen::VectorXd state, control;
     
