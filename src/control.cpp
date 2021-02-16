@@ -19,7 +19,7 @@ public:
     {
         pusherOdomSub = nh.subscribe("/odom/pusher", 1, &Control::pusherOdomCallback, this);
         sliderOdomSub = nh.subscribe("/odom/slider", 1, &Control::sliderOdomCallback, this);
-        pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
+        pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
         pathNomiPub = nh.advertise<nav_msgs::Path>("/path/nominal", 10);
         pathMPCPub = nh.advertise<nav_msgs::Path>("/path/mpc", 10);
 
@@ -49,6 +49,13 @@ public:
             control.segment(i*3, 3) << 0.3, 0.0, 0.0;
         }
 
+        pusherVel.linear.x = 0;
+        pusherVel.linear.y = 0;
+        pusherVel.linear.z = 0;
+        pusherVel.angular.x = 0;
+        pusherVel.angular.y = 0;
+        pusherVel.angular.z = 0;
+
         stepCounter = 0;
 
         // define the nominal trajectory
@@ -72,6 +79,7 @@ public:
         }
 
         timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
+        timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
     }
 
     void pusherOdomCallback(const nav_msgs::Odometry &msg) 
@@ -89,7 +97,8 @@ public:
         tf::Pose pose;
         tf::poseMsgToTF(msg.pose.pose, pose);
         float newTheta = tf::getYaw(pose.getRotation());
-        if (abs(newTheta - sliderPose.theta) < 6){
+        // To prevent sudden change from pi to -pi or vice versa
+        if (abs(newTheta - sliderPose.theta) < 3){
             sliderPose.theta = newTheta;
         }
     }
@@ -117,8 +126,9 @@ public:
         //     controlNominal.segment(i*3, 3) << 0.3, 0.0, 0.0;
         // }
         
-        stateNominal.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
-        state.segment(0,4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        state.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        state.tail(4) = stateNominal.tail(4);
 
         ifopt::Problem nlp;
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
@@ -130,11 +140,10 @@ public:
 
         Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
         
-        state = variables.segment(0, 4 * MPCSteps);
-        control = variables.segment(4 * MPCSteps, 3 * MPCSteps);
-
+        state.head(4 * MPCSteps - 4) = variables.segment(4, 4 * MPCSteps-4);
+        control.head(3 * MPCSteps - 3) = variables.segment(4 * MPCSteps+3, 3 * MPCSteps-3);
+        
         // convert pusher velocity from slider frame to world frame
-        geometry_msgs::Twist pusherVel;
 
         J << 1, 0, -yC,
             0, 1, xC;
@@ -144,7 +153,7 @@ public:
         Gc.setZero();
         Gc.leftCols(2) = J * L * B;
         Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
-        Eigen::Vector2d vPusher = Gc * control.segment(3, 3);
+        Eigen::Vector2d vPusher = Gc * control.segment(0, 3);
         if (vPusher(0) > 0.2){
             vPusher(0) = 0.2;
         }
@@ -158,7 +167,7 @@ public:
 
         // if not solved, reset control and state
         int status = solver.GetReturnStatus();
-        if (status != 1){
+        if (status == 13){
             control.setZero();
         }
 
@@ -168,9 +177,7 @@ public:
         if (debugInfo){
             nlp.PrintCurrent();
             nav_msgs::Path pathNomi, pathMPC;
-            // pathNomi.header.stamp = ros::Time::now();
             pathNomi.header.frame_id = "world";
-            // pathMPC.header.stamp = ros::Time::now();
             pathMPC.header.frame_id = "world";
 
             geometry_msgs::PoseStamped pose;
@@ -192,9 +199,12 @@ public:
         }
         std::cout << stateNominal.tail(4).transpose() << "\n";
         std::cout << sliderPose.theta << "\n";
-        std::cout << state.tail(4).transpose() << "\n";
+        std::cout << state.segment(4 * MPCSteps-4,4).transpose() << "\n";
 
         ++stepCounter;
+    }
+    
+    void pubPusherVel(const ros::TimerEvent&){
         pusherVelPub.publish(pusherVel);
     }
 
@@ -202,9 +212,10 @@ private:
     ros::NodeHandle nh;
     ros::Subscriber sliderOdomSub, pusherOdomSub;
     ros::Publisher pusherVelPub, pathNomiPub, pathMPCPub;
-    ros::Timer timer1;
+    ros::Timer timer1, timerVel;
 
     geometry_msgs::Pose2D sliderPose;
+    geometry_msgs::Twist pusherVel;
     double xC, yC, phi, fMax, mMax, c, mu, m, muGround;
     int MPCSteps, stepCounter;
     double tStep;
@@ -229,7 +240,7 @@ main(int argc, char *argv[])
     ros::NodeHandle n("~");
     Control control(n);
 
-    ros::AsyncSpinner spinner(4);
+    ros::AsyncSpinner spinner(6);
     spinner.start();
     ros::waitForShutdown();
     return 0;

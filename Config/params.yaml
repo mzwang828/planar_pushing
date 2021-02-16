@@ -11,7 +11,7 @@ n_step: 20
 t_step: 0.05
 QFinal: 2000.0
 Q: 10.0
-R: 0.01
+R: 0.5
 
 # debug
 debug_info: true
