@@ -69,7 +69,7 @@ namespace ifopt
           bounds.at(i*4) = Bounds(-10.0, 10.0);
           bounds.at(i*4 + 1) = Bounds(-1.0, 1.0);
           bounds.at(i*4 + 2) = Bounds(-3.14, 3.14);
-          bounds.at(i*4 + 3) = Bounds(-0.40, 0.40);
+          bounds.at(i*4 + 3) = Bounds(-0.35, 0.35);
         }
         bounds.at(0) = Bounds(x0[0], x0[0]);
         bounds.at(1) = Bounds(x0[1], x0[1]);
@@ -82,7 +82,7 @@ namespace ifopt
         {
           bounds.at(3 * i) = Bounds(0.0, inf);
           bounds.at(3 * i + 1) = Bounds(-inf, inf);
-          bounds.at(3 * i + 2) = Bounds(-0.1, 0.1);
+          bounds.at(3 * i + 2) = Bounds(-inf, inf);
         }
       }
       return bounds;
@@ -125,13 +125,12 @@ namespace ifopt
       VectorXd g(GetRows());
       VectorXd state = GetVariables()->GetComponent("state")->GetValues();
       VectorXd control = GetVariables()->GetComponent("control")->GetValues();
-
       for (int i = 1; i < nStep; i++)
       {
         double theta = state(i*4 + 2);
         double phi = state(i*4 + 3);
         double yC = - xC * tan(phi);
-        double pdot = control(3*i+2);
+        double pdot = control(3*(i-1)+2);
 
         Eigen::Matrix3d R;
         R << cos(theta), -sin(theta), 0,
@@ -153,22 +152,22 @@ namespace ifopt
 
 
         g.segment(4 * (i - 1), 4) = (state.segment(4 * i, 4) - state.segment(4 * (i - 1), 4) -
-                                     dynamics * control.segment(3*i, 3) * tStep);
+                                     dynamics * control.segment(3*(i-1), 3) * tStep);
 
         // up
-        g(4 * (nStep - 1) + i - 1) = -std::min(-pdot, 0.0) * (control(3 * i + 1) - mu * control(3 * i));
+        g(4 * (nStep - 1) + i - 1) = -std::min(-pdot, 0.0) * (control(3 * (i-1) + 1) - mu * control(3 * (i-1)));
 
         // down
-        g(5 * (nStep - 1) + i - 1) = -std::min(pdot, 0.0) * (control(3 * i + 1) + mu * control(3 * i));
+        g(5 * (nStep - 1) + i - 1) = -std::min(pdot, 0.0) * (control(3 * (i-1) + 1) + mu * control(3 * (i-1)));
         // friction cone
-        g(6 * (nStep - 1) + i - 1) = control(3 * i + 1) - mu * control(3 * i);
-        g(7 * (nStep - 1) + i - 1) = control(3 * i + 1) + mu * control(3 * i);
+        g(6 * (nStep - 1) + i - 1) = control(3 * (i-1) + 1) - mu * control(3 * (i-1));
+        g(7 * (nStep - 1) + i - 1) = control(3 * (i-1) + 1) + mu * control(3 * (i-1));
 
         // constraints for the pusher vel, v_n and v_t
         Eigen::MatrixXd Gc(2,3), dGcdPhi(2,3);;
         Gc.leftCols(2) = J * L * B;
         Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
-        Eigen::Vector2d vPusher = Gc * control.segment(3*i, 3);
+        Eigen::Vector2d vPusher = Gc * control.segment(3*(i-1), 3);
         g(8 * (nStep - 1) + i - 1) = vPusher(0);   // normal velocity
         g(9 * (nStep - 1) + i - 1) = vPusher(1);   // tangential velocity
       }
@@ -187,8 +186,8 @@ namespace ifopt
       for (int i = 0; i < nStep - 1; ++i){
         bounds.at(6*(nStep - 1)+i) = Bounds(-inf, 0.0);
         bounds.at(7*(nStep - 1)+i) = Bounds(0.0, inf);
-        bounds.at(8*(nStep - 1)+i) = Bounds(0.0, 0.2);
-        bounds.at(9*(nStep - 1)+i) = Bounds(-0.1, 0.1);
+        bounds.at(8*(nStep - 1)+i) = Bounds(0.0, 0.3);
+        bounds.at(9*(nStep - 1)+i) = Bounds(-0.3, 0.3);
       }
       return bounds;
     }
@@ -209,7 +208,7 @@ namespace ifopt
         double theta = state(i * 4 + 2);
         double phi = state(i * 4 + 3);
         double yC = -xC * tan(phi);
-        double pdot = control(3 * i + 2);
+        double pdot = control(3 * (i-1) + 2);
 
         Eigen::Matrix3d R;
         R << cos(theta), -sin(theta), 0,
@@ -220,81 +219,109 @@ namespace ifopt
         J << 1, 0, -yC,
             0, 1, xC;
 
-        B.col(0) = J.transpose() * Eigen::Vector2d(1, 0);
-        B.col(1) = J.transpose() * Eigen::Vector2d(0, 1);
+        // B.col(0) = J.transpose() * Eigen::Vector2d(1, 0);
+        // B.col(1) = J.transpose() * Eigen::Vector2d(0, 1);
+        B = J.transpose();
 
-        Eigen::MatrixXd dynamics(4, 3), ddynamicsdTheta(4, 3), ddynamicsdPhi(4, 3);
-        dynamics.setZero();
-        dynamics.topLeftCorner(3, 2) = R * L * B;
-        dynamics(3, 2) = 1;
+        // Eigen::MatrixXd Gc(2,3), dGcdPhi(2,3);
+        // Gc.leftCols(2) = J * L * B;
+        // Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
 
-        Eigen::MatrixXd Gc(2,3), dGcdPhi(2,3);
-        Gc.leftCols(2) = J * L * B;
-        Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
+        // Eigen::MatrixXd dRdTheta(3, 3), dBdPhi(3, 2), dJdPhi(2, 3);
+        // dRdTheta << -sin(theta), -cos(theta), 0,
+        //             cos(theta), -sin(theta), 0,
+        //             0, 0, 0;
 
-        Eigen::MatrixXd dRdTheta(3, 3), dBdPhi(3, 2), dJdPhi(2, 3);
-        dRdTheta << -sin(theta), -cos(theta), 0,
-                    cos(theta), -sin(theta), 0,
-                    0, 0, 0;
+        // dBdPhi << 0, 0,
+        //           0, 0,
+        //           xC / (cos(phi) * cos(phi)), 0;
 
-        dBdPhi << 0, 0,
-                  0, 0,
-                  xC / (cos(phi) * cos(phi)), 0;
+        // dJdPhi << 0, 0, xC / (cos(phi) * cos(phi)),
+        //           0, 0, 0;
 
-        dJdPhi << 0, 0, xC / (cos(phi) * cos(phi)),
-                  0, 0, 0;
+        // ddynamicsdTheta.setZero();
+        // ddynamicsdTheta.topLeftCorner(3, 2) = dRdTheta * L * B;
+        // ddynamicsdPhi.setZero();
+        // ddynamicsdPhi.topLeftCorner(3, 2) = R * L * dBdPhi;
 
-        ddynamicsdTheta.setZero();
-        ddynamicsdTheta.topLeftCorner(3, 2) = dRdTheta * L * B;
-        ddynamicsdPhi.setZero();
-        ddynamicsdPhi.topLeftCorner(3, 2) = R * L * dBdPhi;
-
-        dGcdPhi.setZero();
-        dGcdPhi.leftCols(2) = dJdPhi * L * B + J * L * dBdPhi;
-        dGcdPhi.col(2) << 0.0, -2*xC*sin(phi)/(cos(phi)*cos(phi)*cos(phi));
+        // dGcdPhi.setZero();
+        // dGcdPhi.leftCols(2) = dJdPhi * L * B + J * L * dBdPhi;
+        // dGcdPhi.col(2) << 0.0, -2*xC*sin(phi)/(cos(phi)*cos(phi)*cos(phi));
 
         if (var_set == "state")
         {
+          Eigen::MatrixXd ddynamicsdTheta(4, 3), ddynamicsdPhi(4, 3);
+          Eigen::MatrixXd dGcdPhi(2,3);
+          Eigen::MatrixXd dRdTheta(3, 3), dBdPhi(3, 2), dJdPhi(2, 3);
+
+          dRdTheta << -sin(theta), -cos(theta), 0,
+                      cos(theta), -sin(theta), 0,
+                      0, 0, 0;
+
+          dBdPhi << 0, 0,
+                    0, 0,
+                    xC / (cos(phi) * cos(phi)), 0;
+
+          dJdPhi << 0, 0, xC / (cos(phi) * cos(phi)),
+                    0, 0, 0;
+
+          ddynamicsdTheta.setZero();
+          ddynamicsdTheta.topLeftCorner(3, 2) = dRdTheta * L * B;
+          ddynamicsdPhi.setZero();
+          ddynamicsdPhi.topLeftCorner(3, 2) = R * L * dBdPhi;
+          dGcdPhi.setZero();
+          dGcdPhi.leftCols(2) = dJdPhi * L * B + J * L * dBdPhi;
+          dGcdPhi.col(2) << 0.0, -2*xC*sin(phi)/(cos(phi)*cos(phi)*cos(phi));
+          
           for (int j = 0; j < 4; ++j)
           {
             tripletState.push_back(T(4 * (i - 1) + j, 4 * i + j, 1));
             tripletState.push_back(T(4 * (i - 1) + j, 4 * (i - 1) + j, -1));
             // regarding theta
-            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 2, (-ddynamicsdTheta * control.segment(3 * i, 3) * tStep)(j)));
+            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 2, (-ddynamicsdTheta * control.segment(3 * (i-1), 3) * tStep)(j)));
             // regarding phi
-            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 3, (-ddynamicsdPhi * control.segment(3 * i, 3) * tStep)(j)));
+            tripletState.push_back(T(4 * (i - 1) + j, 4 * i + 3, (-ddynamicsdPhi * control.segment(3 * (i-1), 3) * tStep)(j)));
           }
-          tripletState.push_back(T(8 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(0)));
-          tripletState.push_back(T(9 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * i, 3))(1)));
+          tripletState.push_back(T(8 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * (i-1), 3))(0)));
+          tripletState.push_back(T(9 * (nStep - 1) + i - 1, 4 * i + 3, (dGcdPhi * control.segment(3 * (i-1), 3))(1)));
         }
         else if (var_set == "control")
         {
+          Eigen::MatrixXd dynamics(4, 3);
+          dynamics.setZero();
+          dynamics.topLeftCorner(3, 2) = R * L * B;
+          dynamics(3, 2) = 1;
+
+          Eigen::MatrixXd Gc(2,3);
+          Gc.leftCols(2) = J * L * B;
+          Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
+
           for (int j = 0; j < 4; ++j)
           {
-            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i, -dynamics(j, 0) * tStep));
-            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i + 1, -dynamics(j, 1) * tStep));
-            tripletControl.push_back(T(4 * (i - 1) + j, 3 * i + 2, -dynamics(j, 2) * tStep));
+            tripletControl.push_back(T(4 * (i - 1) + j, 3 * (i-1), -dynamics(j, 0) * tStep));
+            tripletControl.push_back(T(4 * (i - 1) + j, 3 * (i-1) + 1, -dynamics(j, 1) * tStep));
+            tripletControl.push_back(T(4 * (i - 1) + j, 3 * (i-1) + 2, -dynamics(j, 2) * tStep));
           }
           // up
-          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * i, std::min(-pdot, 0.0) * mu));
-          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * i + 1, -std::min(-pdot, 0.0)));
-          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * i + 2, -pdot < 0.0 ? (control(3 * i + 1) - mu * control(3 * i)) : 0));
+          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i-1), std::min(-pdot, 0.0) * mu));
+          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i-1) + 1, -std::min(-pdot, 0.0)));
+          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i-1) + 2, -pdot < 0.0 ? (control(3 * (i-1) + 1) - mu * control(3 * (i-1))) : 0));
           // down
-          tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * i, -std::min(pdot, 0.0) * mu));
-          tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * i + 1, -std::min(pdot, 0.0)));
-          tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * i + 2, pdot < 0.0 ? -(control(3 * i + 1) + mu * control(3 * i)) : 0));
+          tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * (i-1), -std::min(pdot, 0.0) * mu));
+          tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * (i-1) + 1, -std::min(pdot, 0.0)));
+          tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * (i-1) + 2, pdot < 0.0 ? -(control(3 * (i-1) + 1) + mu * control(3 * (i-1))) : 0));
           // friction cone
-          tripletControl.push_back(T(6 * (nStep - 1) + i - 1, 3 * i, -mu));
-          tripletControl.push_back(T(6 * (nStep - 1) + i - 1, 3 * i + 1, 1));
-          tripletControl.push_back(T(7 * (nStep - 1) + i - 1, 3 * i, mu));
-          tripletControl.push_back(T(7 * (nStep - 1) + i - 1, 3 * i + 1, 1));
+          tripletControl.push_back(T(6 * (nStep - 1) + i - 1, 3 * (i-1), -mu));
+          tripletControl.push_back(T(6 * (nStep - 1) + i - 1, 3 * (i-1) + 1, 1));
+          tripletControl.push_back(T(7 * (nStep - 1) + i - 1, 3 * (i-1), mu));
+          tripletControl.push_back(T(7 * (nStep - 1) + i - 1, 3 * (i-1) + 1, 1));
           // pusher velocity
-          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i, Gc(0,0)));
-          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i+1, Gc(0,1)));
-          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * i+2, Gc(0,2)));
-          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i, Gc(1,0)));
-          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i+1, Gc(1,1)));
-          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * i+2, Gc(1,2)));
+          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * (i-1), Gc(0,0)));
+          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * (i-1)+1, Gc(0,1)));
+          tripletControl.push_back(T(8 * (nStep - 1) + i - 1, 3 * (i-1)+2, Gc(0,2)));
+          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * (i-1), Gc(1,0)));
+          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * (i-1)+1, Gc(1,1)));
+          tripletControl.push_back(T(9 * (nStep - 1) + i - 1, 3 * (i-1)+2, Gc(1,2)));
         }
       }
       if (var_set == "state")
@@ -350,8 +377,8 @@ namespace ifopt
         cost += (control.segment(i * 3, 3) - controlNominal.segment(i * 3, 3)).transpose() *
                 R * weightR * (control.segment(i * 3, 3) - controlNominal.segment(i * 3, 3));
       }
-      cost += (state.segment((nStep - 1) * 4, 4) - stateNominal.segment((nStep - 1) * 4, 4)).transpose() *
-              QFinal * weightQ * (state.segment((nStep - 1) * 4, 4) - stateNominal.segment((nStep - 1) * 4, 4));
+      cost += (state.tail(4) - stateNominal.tail(4)).transpose() *
+              QFinal * weightQ * (state.tail(4) - stateNominal.tail(4));
       return cost;
     }
 

@@ -30,7 +30,6 @@ public:
         xC = -params["length"].as<double>() / 2.0;
         mMax = params["mMax"].as<double>();
         fMax = muGround * m * 9.81;
-        c = fMax/mMax;
         MPCSteps = params["n_step"].as<int>();
         tStep = params["t_step"].as<double>();
         debugInfo = params["debug_info"].as<bool>();
@@ -41,11 +40,13 @@ public:
         L << 2/(fMax*fMax), 0, 0,
              0, 2/(fMax*fMax), 0,
              0, 0, 2/(mMax*mMax);
-        
+
         state.resize(4*MPCSteps);
-        control.resize(3*MPCSteps);
+        control.resize(3*MPCSteps-3);
         for (int i = 0; i < MPCSteps; ++i) {
             state.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
+        }
+        for (int i = 0; i < MPCSteps-1; ++i) {
             control.segment(i*3, 3) << 0.3, 0.0, 0.0;
         }
 
@@ -67,7 +68,7 @@ public:
         lineNomi.tail(4) << 10, 0, 0, 0;
 
         // circular tracking
-        radius = 0.16;
+        radius = 0.15;
         float targetAV = 0.2;
         int nPointsPi = 3.14/(targetAV*tStep);        
         eightNomi.resize(nPointsPi*4*4);
@@ -77,7 +78,6 @@ public:
             eightNomi.segment(2*4*nPointsPi + i*4, 4) << radius * sin(targetAV*i*tStep), 3*radius + radius*cos(targetAV*i*tStep), - targetAV*i*tStep, 0;
             eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
         }
-
         timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
         timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
     }
@@ -106,42 +106,41 @@ public:
     void findSolution(const ros::TimerEvent&)
     {
         
-        Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal(MPCSteps*3);
+        Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal((MPCSteps-1)*3);
+
+        for (int i = 0; i < MPCSteps-1; ++i){
+            controlNominal.segment(i*3, 3) << 0,0,0;
+        }
 
         // straight line
-        for (int i = 0; i < MPCSteps; ++i){
-            // stateNominal.segment(i*4, 4) << sliderPose.x + 0.05*i*tStep, 0,0,0;
-            controlNominal.segment(i*3, 3) << 0.0, 0.0, 0.0;
-        }
-        // stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
+        // if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+        //     stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
+        // } else {
+        //     stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
+        // }
+        // 8 shape
         if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
             stepCounter = 0;
         }
         stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
-
-        // circular
-        // double alpha = atan2(sliderPose.x, radius - sliderPose.y);
-        // for (int i = 0; i < MPCSteps; ++i){
-        //     stateNominal.segment(i*4, 4) << radius*sin(alpha + alphaDot*i*tStep), radius - radius*cos(alpha + alphaDot*i*tStep), alpha + alphaDot*i*tStep, 0;
-        //     controlNominal.segment(i*3, 3) << 0.3, 0.0, 0.0;
-        // }
         
-        stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        // stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
         state.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
-        state.tail(4) = stateNominal.tail(4);
 
         ifopt::Problem nlp;
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
-        nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(3*MPCSteps, "control", control));
+        nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(3*(MPCSteps-1), "control", control));
         nlp.AddConstraintSet(std::make_shared<ifopt::ExConstraint>(10*(MPCSteps-1)));
-        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, controlNominal));
+        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, control));
 
         solver.Solve(nlp);
 
         Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
         
         state.head(4 * MPCSteps - 4) = variables.segment(4, 4 * MPCSteps-4);
-        control.head(3 * MPCSteps - 3) = variables.segment(4 * MPCSteps+3, 3 * MPCSteps-3);
+        state.tail(4) = variables.segment(4 * MPCSteps-4, 4);
+        control.head(3 * MPCSteps - 6) = variables.segment(4 * MPCSteps+3, 3 * MPCSteps-6);
+        // control.tail(3) << 0.5, 0, 0;
         
         // convert pusher velocity from slider frame to world frame
 
@@ -154,22 +153,22 @@ public:
         Gc.leftCols(2) = J * L * B;
         Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
         Eigen::Vector2d vPusher = Gc * control.segment(0, 3);
-        if (vPusher(0) > 0.2){
-            vPusher(0) = 0.2;
+        if (vPusher(0) > 0.3){
+            vPusher(0) = 0.3;
         }
-        if (vPusher(1) > 0.2){
-            vPusher(1) = 0.2;
-        } else if (vPusher(1) < -0.2){
-            vPusher(1) = -0.2;
+        if (vPusher(1) > 0.3){
+            vPusher(1) = 0.3;
+        } else if (vPusher(1) < -0.3){
+            vPusher(1) = -0.3;
         }
         pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
         pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
 
         // if not solved, reset control and state
-        int status = solver.GetReturnStatus();
-        if (status == 13){
-            control.setZero();
-        }
+        // int status = solver.GetReturnStatus();
+        // if (status == 13){
+        //     control.setZero();
+        // }
 
         std::cout << "---------\n";
 
@@ -197,9 +196,11 @@ public:
             pathNomiPub.publish(pathNomi);
             pathMPCPub.publish(pathMPC);
         }
-        std::cout << stateNominal.tail(4).transpose() << "\n";
-        std::cout << sliderPose.theta << "\n";
-        std::cout << state.segment(4 * MPCSteps-4,4).transpose() << "\n";
+
+        double error = sqrt((stateNominal(4) - sliderPose.x) * (stateNominal(4) - sliderPose.x) + 
+                       (stateNominal(5) - sliderPose.y) * (stateNominal(5) - sliderPose.y));
+        std::cout << error << "\n";
+        std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
 
         ++stepCounter;
     }
@@ -229,7 +230,7 @@ private:
     Eigen::MatrixXd J, L, B;
 
     // reference trajectory
-    Eigen::VectorXd lineNomi, eightNomi;
+    Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
 
     ifopt::SnoptSolver solver;
 };

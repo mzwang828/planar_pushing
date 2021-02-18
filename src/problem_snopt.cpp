@@ -16,17 +16,17 @@ int main()
   Problem nlp;
   Eigen::VectorXd initValues(n_step * 4);
   initValues.setZero();
-  Eigen::VectorXd stateNominal(n_step*4), controlNominal(n_step*3);
+  Eigen::VectorXd stateNominal(n_step*4), controlNominal((n_step-1)*3);
   for (int i = 0; i < n_step; ++i){
-    stateNominal.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
-    initValues.segment(i*4, 4) << 0.05*i*tStep, 0,0,0;
-    controlNominal.segment(i*3, 3) << 0.3, 0, 0;
+    stateNominal.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
+    initValues.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
   }
+  controlNominal.setZero();
 
-  initValues.head(4) << 0.0, 0.002, 0, 0;
+  initValues.head(4) << 0.0, 0.0, 0, 0;
 
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initValues));
-  nlp.AddVariableSet(std::make_shared<ExVariables>(3*n_step, "control", controlNominal));
+  nlp.AddVariableSet(std::make_shared<ExVariables>(3*(n_step-1), "control", controlNominal));
   nlp.AddConstraintSet(std::make_shared<ExConstraint>(10*(n_step-1)));
   nlp.AddCostSet(std::make_shared<ExCost>("cost", stateNominal, controlNominal));
 
@@ -39,10 +39,12 @@ int main()
 
   Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
   Eigen::Map<Eigen::MatrixXd> state(variables.segment(0, 4 * n_step).data(), 4, n_step);
-  Eigen::Map<Eigen::MatrixXd> control(variables.segment(4 * n_step, 3 * n_step).data(), 3, n_step);
+  Eigen::Map<Eigen::MatrixXd> control(variables.segment(4 * n_step, 3 * (n_step-1)).data(), 3, n_step-1);
+  Eigen::Map<Eigen::MatrixXd> reference(stateNominal.data(), 4, n_step);
+
 
   std::cout.precision(5);
-
+  std::cout << "reference: \n" << reference << "\n";
   std::cout << "state: \n" << state << "\n";
   std::cout << "control: \n" << control << "\n";
   
