@@ -16,19 +16,20 @@ int main()
   Problem nlp;
   Eigen::VectorXd initValues(n_step * 4);
   initValues.setZero();
-  Eigen::VectorXd stateNominal(n_step*4), controlNominal((n_step-1)*3);
+  Eigen::VectorXd stateNominal(n_step*4+4), controlNominal((n_step-1)*3);
   for (int i = 0; i < n_step; ++i){
     stateNominal.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
     initValues.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
   }
   controlNominal.setZero();
+  stateNominal.tail(4) << 0.15 * sin(0.2*n_step*tStep), 0.15 - 0.15*cos(0.2*n_step*tStep), 0.2*n_step*tStep, 0;
 
   initValues.head(4) << 0.0, 0.0, 0, 0;
 
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initValues));
   nlp.AddVariableSet(std::make_shared<ExVariables>(3*(n_step-1), "control", controlNominal));
   nlp.AddConstraintSet(std::make_shared<ExConstraint>(10*(n_step-1)));
-  nlp.AddCostSet(std::make_shared<ExCost>("cost", stateNominal, controlNominal));
+  nlp.AddCostSet(std::make_shared<ExCost>("cost", stateNominal.segment(0, n_step*4), controlNominal));
 
   nlp.PrintCurrent();
 
@@ -47,5 +48,19 @@ int main()
   std::cout << "reference: \n" << reference << "\n";
   std::cout << "state: \n" << state << "\n";
   std::cout << "control: \n" << control << "\n";
+
+  getchar();
+
+  variables.head(4) << 0.02,0,0,0;
+  Problem nlp2;
+  nlp2.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", variables.segment(0, 4 * n_step)));
+  nlp2.AddVariableSet(std::make_shared<ExVariables>(3*(n_step-1), "control", variables.segment(4 * n_step, 3 * (n_step-1))));
+  nlp2.AddConstraintSet(std::make_shared<ExConstraint>(10*(n_step-1)));
+  nlp2.AddCostSet(std::make_shared<ExCost>("cost", stateNominal.segment(4, 4*n_step), controlNominal));
+
+  solver.Solve(nlp2);
+
+  nlp2.PrintCurrent();
+
   
 }

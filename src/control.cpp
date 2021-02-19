@@ -4,6 +4,7 @@
 #include <geometry_msgs/Pose2D.h>
 #include <tf/transform_datatypes.h>
 #include <nav_msgs/Path.h>
+#include <visualization_msgs/Marker.h>
 
 #include <yaml-cpp/yaml.h>
 #include <math.h>
@@ -22,6 +23,7 @@ public:
         pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
         pathNomiPub = nh.advertise<nav_msgs::Path>("/path/nominal", 10);
         pathMPCPub = nh.advertise<nav_msgs::Path>("/path/mpc", 10);
+        markerPub = nh.advertise<visualization_msgs::Marker>( "/slider_marker", 0 );
 
         YAML::Node params = YAML::LoadFile("/home/mzwang/qsp_ws/src/pusher/Config/params.yaml");
         mu = params["mu"].as<double>();
@@ -58,6 +60,19 @@ public:
         pusherVel.angular.z = 0;
 
         stepCounter = 0;
+
+        marker.header.frame_id = "world";
+        marker.ns = "my_namespace";
+        marker.id = 0;
+        marker.type = visualization_msgs::Marker::CUBE;
+        marker.action = visualization_msgs::Marker::ADD;
+        marker.scale.x = 0.01;
+        marker.scale.y = 0.01;
+        marker.scale.z = 0.01;
+        marker.color.a = 0.5; // Don't forget to set the alpha!
+        marker.color.r = 0.0;
+        marker.color.g = 0.0;
+        marker.color.b = 1.0;
 
         // define the nominal trajectory
         float targetLV = 0.05;
@@ -101,6 +116,10 @@ public:
         if (abs(newTheta - sliderPose.theta) < 3){
             sliderPose.theta = newTheta;
         }
+
+        marker.header.stamp = ros::Time();
+        marker.pose = msg.pose.pose;
+        marker.pose.position.z = 0;
     }
     
     void findSolution(const ros::TimerEvent&)
@@ -140,6 +159,7 @@ public:
         state.head(4 * MPCSteps - 4) = variables.segment(4, 4 * MPCSteps-4);
         state.tail(4) = variables.segment(4 * MPCSteps-4, 4);
         control.head(3 * MPCSteps - 6) = variables.segment(4 * MPCSteps+3, 3 * MPCSteps-6);
+        Eigen::Vector3d controlNow = variables.segment(4 * MPCSteps, 3);
         // control.tail(3) << 0.5, 0, 0;
         
         // convert pusher velocity from slider frame to world frame
@@ -152,7 +172,7 @@ public:
         Gc.setZero();
         Gc.leftCols(2) = J * L * B;
         Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
-        Eigen::Vector2d vPusher = Gc * control.segment(0, 3);
+        Eigen::Vector2d vPusher = Gc * controlNow;
         if (vPusher(0) > 0.3){
             vPusher(0) = 0.3;
         }
@@ -165,10 +185,10 @@ public:
         pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
 
         // if not solved, reset control and state
-        // int status = solver.GetReturnStatus();
-        // if (status == 13){
-        //     control.setZero();
-        // }
+        int status = solver.GetReturnStatus();
+        if (status == 13){
+            control.setZero();
+        }
 
         std::cout << "---------\n";
 
@@ -193,6 +213,7 @@ public:
                 pathMPC.poses.push_back(pose);
             }
 
+            markerPub.publish( marker );
             pathNomiPub.publish(pathNomi);
             pathMPCPub.publish(pathMPC);
         }
@@ -201,6 +222,7 @@ public:
                        (stateNominal(5) - sliderPose.y) * (stateNominal(5) - sliderPose.y));
         std::cout << error << "\n";
         std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
+        std::cout << controlNow.transpose() << "\n";
 
         ++stepCounter;
     }
@@ -212,8 +234,11 @@ public:
 private:
     ros::NodeHandle nh;
     ros::Subscriber sliderOdomSub, pusherOdomSub;
-    ros::Publisher pusherVelPub, pathNomiPub, pathMPCPub;
+    ros::Publisher pusherVelPub;
+    ros::Publisher pathNomiPub, pathMPCPub, markerPub;
     ros::Timer timer1, timerVel;
+
+    visualization_msgs::Marker marker;
 
     geometry_msgs::Pose2D sliderPose;
     geometry_msgs::Twist pusherVel;

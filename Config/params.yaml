@@ -1,17 +1,17 @@
 # params for the slider
 mu: 0.60
-mu_g: 0.60
+mu_g: 0.35
 m: 1.05
 length: 0.09 # along x direction 
 width: 0.09 # along y direction
-mMax: 0.212811382 # numerical integrated
+mMax: 0.360 # numerical integrated
 
 # params for MPC
 n_step: 20
 t_step: 0.05
 QFinal: 2000.0
 Q: 10.0
-R: 0.1
+R: 0.5
 
 # debug
 debug_info: true
