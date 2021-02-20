@@ -102,7 +102,7 @@ namespace ifopt
     // each set can contain multiple related constraints.
     ExConstraint(int n, const std::string &name) : ConstraintSet(n, name)
     {
-      YAML::Node params = YAML::LoadFile("/home/mzwang/qsp_ws/src/pusher/Config/params.yaml");
+      YAML::Node params = YAML::LoadFile("/home/pengchang/build_ws/src/planar_pushing/Config/params.yaml");
       mu = params["mu"].as<double>();
       muGround = params["mu_g"].as<double>();
       m = params["m"].as<double>();
@@ -353,7 +353,7 @@ namespace ifopt
     {
       stateNominal = stateIn;
       controlNominal = controlIn;
-      YAML::Node params = YAML::LoadFile("/home/mzwang/qsp_ws/src/pusher/Config/params.yaml");
+      YAML::Node params = YAML::LoadFile("/home/pengchang/build_ws/src/planar_pushing/Config/params.yaml");
       QFinal = params["QFinal"].as<double>();
       Q = params["Q"].as<double>();
       R = params["R"].as<double>();

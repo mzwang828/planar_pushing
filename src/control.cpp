@@ -6,6 +6,8 @@
 #include <nav_msgs/Path.h>
 #include <visualization_msgs/Marker.h>
 
+#include <kortex_driver/SendTwistCommand.h>
+
 #include <yaml-cpp/yaml.h>
 #include <math.h>
 #include <algorithm>
@@ -18,14 +20,13 @@ class Control
 public:
     Control(ros::NodeHandle n) : nh(n)
     {
-        pusherOdomSub = nh.subscribe("/odom/pusher", 1, &Control::pusherOdomCallback, this);
-        sliderOdomSub = nh.subscribe("/odom/slider", 1, &Control::sliderOdomCallback, this);
-        pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+        pusherOdomSub = nh.subscribe("/pose/pusher", 1, &Control::pusherOdomCallback, this);
+        sliderOdomSub = nh.subscribe("/pose/slider", 1, &Control::sliderOdomCallback, this);
+        gen3VelClient = nh.serviceClient<kortex_driver::SendTwistCommand>("/my_gen3/base/send_twist_command");
         pathNomiPub = nh.advertise<nav_msgs::Path>("/path/nominal", 10);
         pathMPCPub = nh.advertise<nav_msgs::Path>("/path/mpc", 10);
         markerPub = nh.advertise<visualization_msgs::Marker>( "/slider_marker", 0 );
-
-        YAML::Node params = YAML::LoadFile("/home/mzwang/qsp_ws/src/pusher/Config/params.yaml");
+        YAML::Node params = YAML::LoadFile("/home/pengchang/build_ws/src/planar_pushing/Config/params.yaml");
         mu = params["mu"].as<double>();
         muGround = params["mu_g"].as<double>();
         m = params["m"].as<double>();
@@ -61,26 +62,26 @@ public:
 
         stepCounter = 0;
 
-        marker.header.frame_id = "world";
-        marker.ns = "my_namespace";
-        marker.id = 0;
-        marker.type = visualization_msgs::Marker::CUBE;
-        marker.action = visualization_msgs::Marker::ADD;
-        marker.scale.x = 0.01;
-        marker.scale.y = 0.01;
-        marker.scale.z = 0.01;
-        marker.color.a = 0.5; // Don't forget to set the alpha!
-        marker.color.r = 0.0;
-        marker.color.g = 0.0;
-        marker.color.b = 1.0;
+        // marker.header.frame_id = "base_link";
+        // marker.ns = "my_namespace";
+        // marker.id = 0;
+        // marker.type = visualization_msgs::Marker::CUBE;
+        // marker.action = visualization_msgs::Marker::ADD;
+        // marker.scale.x = 0.01;
+        // marker.scale.y = 0.01;
+        // marker.scale.z = 0.01;
+        // marker.color.a = 0.5; // Don't forget to set the alpha!
+        // marker.color.r = 0.0;
+        // marker.color.g = 0.0;
+        // marker.color.b = 1.0;
 
         // define the nominal trajectory
-        float targetLV = 0.05;
-        lineNomi.resize(int(4*10/(targetLV*tStep))+4);
-        for (int i = 0; i < 10/(targetLV*tStep); ++i){
-            lineNomi.segment(i*4, 4) << targetLV*i*tStep, 0, 0, 0;
+        float targetLV = 0.02;
+        lineNomi.resize(int(4*0.3/(targetLV*tStep))+4);
+        for (int i = 0; i < 0.3/(targetLV*tStep); ++i){
+            lineNomi.segment(i*4, 4) << 0.496+targetLV*i*tStep, 0.144, 0, 0;
         }
-        lineNomi.tail(4) << 10, 0, 0, 0;
+        lineNomi.tail(4) << 0.782, 0, 0, 0;
 
         // circular tracking
         radius = 0.15;
@@ -93,38 +94,38 @@ public:
             eightNomi.segment(2*4*nPointsPi + i*4, 4) << radius * sin(targetAV*i*tStep), 3*radius + radius*cos(targetAV*i*tStep), - targetAV*i*tStep, 0;
             eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
         }
+
+        ros::Duration(1).sleep();
         timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
-        timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
+        // timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
     }
 
-    void pusherOdomCallback(const nav_msgs::Odometry &msg) 
+    void pusherOdomCallback(const geometry_msgs::Pose2D &msg) 
     {
-        double xSliderToPusher = msg.pose.pose.position.x - sliderPose.x;
-        double ySliderToPusher = msg.pose.pose.position.y - sliderPose.y;
+        double xSliderToPusher = msg.x - sliderPose.x;
+        double ySliderToPusher = msg.y - sliderPose.y;
         yC = -sin(sliderPose.theta) * xSliderToPusher + cos(sliderPose.theta) * ySliderToPusher;
         phi = atan(-yC/xC);
     }
 
-    void sliderOdomCallback(const nav_msgs::Odometry &msg) 
+    void sliderOdomCallback(const geometry_msgs::Pose2D &msg) 
     {
-        sliderPose.x = msg.pose.pose.position.x;
-        sliderPose.y = msg.pose.pose.position.y;
-        tf::Pose pose;
-        tf::poseMsgToTF(msg.pose.pose, pose);
-        float newTheta = tf::getYaw(pose.getRotation());
+        sliderPose.x = msg.x;
+        sliderPose.y = msg.y;
+        float newTheta = msg.theta;
         // To prevent sudden change from pi to -pi or vice versa
         if (abs(newTheta - sliderPose.theta) < 3){
             sliderPose.theta = newTheta;
         }
 
-        marker.header.stamp = ros::Time();
-        marker.pose = msg.pose.pose;
-        marker.pose.position.z = 0;
+        // marker.header.stamp = ros::Time();
+        // marker.pose = msg.pose.pose;
+        // marker.pose.position.z = 0;
     }
     
     void findSolution(const ros::TimerEvent&)
     {
-        
+
         Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal((MPCSteps-1)*3);
 
         for (int i = 0; i < MPCSteps-1; ++i){
@@ -132,18 +133,21 @@ public:
         }
 
         // straight line
-        // if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
-        //     stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
-        // } else {
-        //     stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
-        // }
-        // 8 shape
-        if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
-            stepCounter = 0;
+        if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+            stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
+        } else {
+            stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
         }
-        stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
+        // 8 shape
+        // if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
+        //     stepCounter = 0;
+        // }
+        // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
         // stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
+        std::cout << "---------\n";
+        std::cout << "current pose: " << sliderPose.x << ", " << sliderPose.y << ", " << sliderPose.theta << "\n";
+
         state.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
 
         ifopt::Problem nlp;
@@ -173,16 +177,16 @@ public:
         Gc.leftCols(2) = J * L * B;
         Gc.col(2) << 0.0, -xC/(cos(phi)*cos(phi));
         Eigen::Vector2d vPusher = Gc * controlNow;
-        if (vPusher(0) > 0.3){
-            vPusher(0) = 0.3;
+        if (vPusher(0) > 0.1){
+            vPusher(0) = 0.1;
         }
-        if (vPusher(1) > 0.3){
-            vPusher(1) = 0.3;
-        } else if (vPusher(1) < -0.3){
-            vPusher(1) = -0.3;
+        if (vPusher(1) > 0.05){
+            vPusher(1) = 0.05;
+        } else if (vPusher(1) < -0.05){
+            vPusher(1) = -0.05;
         }
-        pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
-        pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
+        float velX = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
+        float velY = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
 
         // if not solved, reset control and state
         int status = solver.GetReturnStatus();
@@ -190,17 +194,18 @@ public:
             control.setZero();
         }
 
-        std::cout << "---------\n";
+        std::cout << "reference goal: " << stateNominal.segment(4,4).transpose() << "\n";
+        std::cout << "solved goal: " << state.head(4).transpose() << "\n";
 
         // DEBUG
         if (debugInfo){
             nlp.PrintCurrent();
             nav_msgs::Path pathNomi, pathMPC;
-            pathNomi.header.frame_id = "world";
-            pathMPC.header.frame_id = "world";
+            pathNomi.header.frame_id = "base_link";
+            pathMPC.header.frame_id = "base_link";
 
             geometry_msgs::PoseStamped pose;
-            pose.header.frame_id = "world";
+            pose.header.frame_id = "base_link";
             for (int i = 0; i < MPCSteps; ++i){
                 pose.pose.position.x = stateNominal(i*4);
                 pose.pose.position.y = stateNominal(i*4+1);
@@ -213,7 +218,7 @@ public:
                 pathMPC.poses.push_back(pose);
             }
 
-            markerPub.publish( marker );
+            // markerPub.publish(marker);
             pathNomiPub.publish(pathNomi);
             pathMPCPub.publish(pathMPC);
         }
@@ -224,18 +229,37 @@ public:
         std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
         std::cout << controlNow.transpose() << "\n";
 
+        std::cout << "xC, yC: " << xC << ", " << yC << "\n";
+
+        // getchar();
+        sendVelRequest(velX, velY);
+        // ros::Duration(0.05).sleep();
+        // sendVelRequest(0, 0);
         ++stepCounter;
     }
     
-    void pubPusherVel(const ros::TimerEvent&){
-        pusherVelPub.publish(pusherVel);
+    void sendVelRequest(float x, float y)
+    {
+      kortex_driver::SendTwistCommand srv;
+      srv.request.input.twist.linear_x = x;
+      srv.request.input.twist.linear_y = y;
+      srv.request.input.twist.linear_z = 0;
+      srv.request.input.twist.angular_x = 0;
+      srv.request.input.twist.angular_y = 0;
+      srv.request.input.twist.angular_z = 0;
+      gen3VelClient.call(srv);
     }
+
+    // void pubPusherVel(const ros::TimerEvent&){
+    //     pusherVelPub.publish(pusherVel);
+    // }
 
 private:
     ros::NodeHandle nh;
     ros::Subscriber sliderOdomSub, pusherOdomSub;
     ros::Publisher pusherVelPub;
     ros::Publisher pathNomiPub, pathMPCPub, markerPub;
+    ros::ServiceClient gen3VelClient;
     ros::Timer timer1, timerVel;
 
     visualization_msgs::Marker marker;

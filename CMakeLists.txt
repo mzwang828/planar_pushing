@@ -17,6 +17,8 @@ find_package(catkin REQUIRED COMPONENTS
   ifopt
 )
 
+find_package(kinova_driver REQUIRED)
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -122,6 +124,7 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${kinova_driver_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -158,20 +161,6 @@ target_link_libraries(control
 add_executable(problem_snopt src/problem_snopt.cpp)
 add_dependencies(problem_snopt ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(problem_snopt
-  ${catkin_LIBRARIES}
-  yaml-cpp
-)
-
-add_executable(problem_ipopt src/problem_ipopt.cpp)
-add_dependencies(problem_ipopt ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(problem_ipopt
-  ${catkin_LIBRARIES}
-  yaml-cpp
-)
-
-add_executable(problemd_snopt src/problemd_snopt.cpp)
-add_dependencies(problemd_snopt ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(problemd_snopt
   ${catkin_LIBRARIES}
   yaml-cpp
 )

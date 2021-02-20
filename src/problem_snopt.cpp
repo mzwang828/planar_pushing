@@ -9,10 +9,11 @@ using namespace ifopt;
 
 int main()
 {
-  YAML::Node params = YAML::LoadFile("/home/mzwang/qsp_ws/src/pusher/Config/params.yaml");
+  YAML::Node params = YAML::LoadFile("/home/pengchang/build_ws/src/planar_pushing/Config/params.yaml");
   int n_step = params["n_step"].as<int>();         // number of steps
   double tStep = params["t_step"].as<double>();
-
+std::cout << n_step << "\n"
+;
   Problem nlp;
   Eigen::VectorXd initValues(n_step * 4);
   initValues.setZero();
@@ -30,7 +31,6 @@ int main()
   nlp.AddVariableSet(std::make_shared<ExVariables>(3*(n_step-1), "control", controlNominal));
   nlp.AddConstraintSet(std::make_shared<ExConstraint>(10*(n_step-1)));
   nlp.AddCostSet(std::make_shared<ExCost>("cost", stateNominal.segment(0, n_step*4), controlNominal));
-
   nlp.PrintCurrent();
 
   SnoptSolver solver;
