@@ -145,7 +145,7 @@ namespace ifopt
         B.col(1) = J.transpose() * Eigen::Vector2d(0, 1);
 
 
-        Eigen::MatrixXd dynamics(4, 3), ddynamicsdTheta(4, 3), ddynamicsdPhi(4, 3);;
+        Eigen::MatrixXd dynamics(4, 3), ddynamicsdTheta(4, 3), ddynamicsdPhi(4, 3);
         dynamics.setZero();
         dynamics.topLeftCorner(3,2) = R*L*B;
         dynamics(3,2) = 1;

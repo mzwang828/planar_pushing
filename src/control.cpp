@@ -18,9 +18,13 @@ class Control
 public:
     Control(ros::NodeHandle n) : nh(n)
     {
+        pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+        pusherMovePub = nh.advertise<geometry_msgs::Twist>("/move_pusher", 1);
+
+        pusherMoveSub = nh.subscribe("/move_pusher", 1, &Control::pusherMoveCallback, this);
         pusherOdomSub = nh.subscribe("/odom/pusher", 1, &Control::pusherOdomCallback, this);
         sliderOdomSub = nh.subscribe("/odom/slider", 1, &Control::sliderOdomCallback, this);
-        pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
+    
         pathNomiPub = nh.advertise<nav_msgs::Path>("/path/nominal", 10);
         pathMPCPub = nh.advertise<nav_msgs::Path>("/path/mpc", 10);
         markerPub = nh.advertise<visualization_msgs::Marker>( "/slider_marker", 0 );
@@ -52,12 +56,12 @@ public:
             control.segment(i*3, 3) << 0.3, 0.0, 0.0;
         }
 
-        pusherVel.linear.x = 0;
-        pusherVel.linear.y = 0;
-        pusherVel.linear.z = 0;
-        pusherVel.angular.x = 0;
-        pusherVel.angular.y = 0;
-        pusherVel.angular.z = 0;
+        zeroVel.linear.x = 0;
+        zeroVel.linear.y = 0;
+        zeroVel.linear.z = 0;
+        zeroVel.angular.x = 0;
+        zeroVel.angular.y = 0;
+        zeroVel.angular.z = 0;
 
         stepCounter = 0;
 
@@ -94,7 +98,7 @@ public:
             eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
         }
         timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
-        timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
+        // timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
     }
 
     void pusherOdomCallback(const nav_msgs::Odometry &msg) 
@@ -121,6 +125,12 @@ public:
         marker.pose = msg.pose.pose;
         marker.pose.position.z = 0;
     }
+
+    void pusherMoveCallback(const geometry_msgs::Twist &msg){
+        pusherVelPub.publish(msg);
+        ros::Duration(0.05).sleep();
+        pusherVelPub.publish(zeroVel);
+    }
     
     void findSolution(const ros::TimerEvent&)
     {
@@ -132,16 +142,16 @@ public:
         }
 
         // straight line
-        // if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
-        //     stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
-        // } else {
-        //     stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
-        // }
-        // 8 shape
-        if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
-            stepCounter = 0;
+        if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+            stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
+        } else {
+            stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
         }
-        stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
+        // 8 shape
+        // if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
+        //     stepCounter = 0;
+        // }
+        // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
         // stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
         state.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
@@ -181,8 +191,13 @@ public:
         } else if (vPusher(1) < -0.3){
             vPusher(1) = -0.3;
         }
+        geometry_msgs::Twist pusherVel;
         pusherVel.linear.x = cos(sliderPose.theta) * vPusher(0) - sin(sliderPose.theta) * vPusher(1);
         pusherVel.linear.y = sin(sliderPose.theta) * vPusher(0) + cos(sliderPose.theta) * vPusher(1);
+        pusherVel.linear.z = 0;
+        pusherVel.angular.x = 0;
+        pusherVel.angular.y = 0;
+        pusherVel.angular.z = 0;
 
         // if not solved, reset control and state
         int status = solver.GetReturnStatus();
@@ -223,25 +238,25 @@ public:
         std::cout << error << "\n";
         std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
         std::cout << controlNow.transpose() << "\n";
-
+        pusherMovePub.publish(pusherVel);
         ++stepCounter;
     }
     
-    void pubPusherVel(const ros::TimerEvent&){
-        pusherVelPub.publish(pusherVel);
-    }
+    // void pubPusherVel(const ros::TimerEvent&){
+    //     pusherVelPub.publish(pusherVel);
+    // }
 
 private:
     ros::NodeHandle nh;
-    ros::Subscriber sliderOdomSub, pusherOdomSub;
-    ros::Publisher pusherVelPub;
+    ros::Subscriber sliderOdomSub, pusherOdomSub, pusherMoveSub;
+    ros::Publisher pusherVelPub, pusherMovePub;
     ros::Publisher pathNomiPub, pathMPCPub, markerPub;
     ros::Timer timer1, timerVel;
 
     visualization_msgs::Marker marker;
 
     geometry_msgs::Pose2D sliderPose;
-    geometry_msgs::Twist pusherVel;
+    geometry_msgs::Twist zeroVel;
     double xC, yC, phi, fMax, mMax, c, mu, m, muGround;
     int MPCSteps, stepCounter;
     double tStep;
