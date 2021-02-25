@@ -18,6 +18,7 @@ int main()
   initValues.setZero();
   Eigen::VectorXd stateNominal(n_step*4+4), controlNominal((n_step-1)*3);
   for (int i = 0; i < n_step; ++i){
+    // stateNominal.segment(i*4, 4) << 0.05*i*tStep, 0, 0, 0;
     stateNominal.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
     initValues.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
   }
