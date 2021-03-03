@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   tf
   ifopt
+  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -58,11 +59,10 @@ find_package(catkin REQUIRED COMPONENTS
 # )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+add_service_files(
+  FILES
+  GetStepControl.srv
+)
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -109,7 +109,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES pusher
-   CATKIN_DEPENDS roscpp rospy std_msgs geometry_msgs nav_msgs tf
+   CATKIN_DEPENDS roscpp rospy std_msgs geometry_msgs nav_msgs tf message_runtime
 #  DEPENDS system_lib
 )
 
@@ -137,7 +137,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(control src/control.cpp)
+add_executable(control_snopt src/control_snopt.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -147,10 +147,10 @@ add_executable(control src/control.cpp)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
-add_dependencies(control ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(control_snopt ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(control
+target_link_libraries(control_snopt
   ${catkin_LIBRARIES}
   yaml-cpp
 )

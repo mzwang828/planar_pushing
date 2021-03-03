@@ -24,7 +24,7 @@ stateNomi = np.zeros((4, nStep))
 controlNomi = np.zeros((3, nStep-1))
 for i in range(nStep):
     stateNomi[0, i] = targetLV*tStep*i
-controlNomi[0, :] = 0.2
+controlNomi[0, :] = 0.3
 
 
 xBarLB = np.empty((4, nStep))
@@ -57,6 +57,7 @@ pusherVUB = np.array([0.3, 0.3])
 gm = gp.Model("qp")
 xBar = gm.addMVar((4, nStep), lb = xBarLB, ub = xBarUB)
 uBar = gm.addMVar((3, nStep-1), lb = uBarLB, ub = uBarUB)
+z = gm.addMVar((3, nStep-1), vtype = GRB.BINARY)
 cost = xBar[:, -1]@QFinal@xBar[:, -1]
 for i in range(nStep - 1):
     cost = cost + xBar[:, i]@Q@xBar[:, i] + uBar[:, i]@R@uBar[:, i]
@@ -91,18 +92,32 @@ for i in range(nStep-1):
     # friction cone
     gm.addConstr(ft + uBar[1,i] <= mu*(fn + uBar[0,i]))
     gm.addConstr(ft + uBar[1,i] >= -mu*(fn + uBar[0,i]))
-    # STC
-    H1 = np.array([mu*pdot, -pdot, fn*mu - ft])
-    H2 = np.array([mu*pdot, pdot, fn*mu + ft])
-    if pdot != 0:
-        gm.addConstr(np.min(-pdot, 0)*(ft-mu*fn) + H1@uBar[:,i] == 0)
-        gm.addConstr(np.min(pdot, 0)*(ft+mu*fn) + H2@uBar[:,i] == 0)
+    # mode selection
+    M = 1.0
+    # stick
+    gm.addConstr(pdot+uBar[2,i] >= M*(z[0,i] - 1))
+    gm.addConstr(pdot+uBar[2,i] <= M*(-z[0,i] + 1))
+    # up
+    gm.addConstr(pdot+uBar[2,i] >= (M*(z[1,i] - 1)))
+    gm.addConstr(mu*(fn+uBar[0,i]) - (ft+uBar[1,i]) >= M*(z[1,i]-1))
+    gm.addConstr(mu*(fn+uBar[0,i]) - (ft+uBar[1,i]) <= M*(-z[1,i]+1))
+    # down
+    gm.addConstr(pdot+uBar[2,i] <= (M*(-z[2,i] + 1)))
+    gm.addConstr(mu*(fn+uBar[0,i]) + (ft+uBar[1,i]) >= M*(z[2,i]-1))
+    gm.addConstr(mu*(fn+uBar[0,i]) + (ft+uBar[1,i]) <= M*(-z[2,i]+1))
+    
+    gm.addConstr(z[0,i] + z[1,i] + z[2,i] == 1)
+
     
 gm.optimize()
 
 gm.printQuality()
 print(gm.Status)
 print('state:')
-print(xBar.X + stateNomi)
+print(xBar.X)
+# print(xBar.X + stateNomi)
 print('control:')
-print(uBar.X + controlNomi)
+print(uBar.X)
+# print(uBar.X + controlNomi)
+print('mode: ')
+print(z.X)

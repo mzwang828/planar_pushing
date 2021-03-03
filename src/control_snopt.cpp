@@ -142,16 +142,16 @@ public:
         }
 
         // straight line
-        // if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
-        //     stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
-        // } else {
-        //     stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
-        // }
-        // 8 shape
-        if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
-            stepCounter = 0;
+        if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+            stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
+        } else {
+            stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
         }
-        stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
+        // 8 shape
+        // if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
+        //     stepCounter = 0;
+        // }
+        // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
         // stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
         state.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
