@@ -61,7 +61,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate services in the 'srv' folder
 add_service_files(
   FILES
-  GetStepControl.srv
+  CalculateControl.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -72,10 +72,10 @@ add_service_files(
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -155,6 +155,13 @@ target_link_libraries(control_snopt
   yaml-cpp
 )
 
+add_executable(control_gurobi src/control_gurobi.cpp)
+add_dependencies(control_gurobi ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(control_gurobi
+  ${catkin_LIBRARIES}
+  yaml-cpp
+)
+
 add_executable(problem_snopt src/problem_snopt.cpp)
 add_dependencies(problem_snopt ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(problem_snopt
@@ -171,10 +178,10 @@ target_link_libraries(problem_snopt
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+catkin_install_python(PROGRAMS
+  scripts/stc_gurobi_server.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html

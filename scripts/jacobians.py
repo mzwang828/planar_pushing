@@ -28,7 +28,7 @@ Gc[:, 2] = Matrix([0, -xC/cos(phi)**2])
 pusherV = Gc * control
 # print(pusherV)
 # dGcdx
-print(pusherV.jacobian(state))
+# print(pusherV.jacobian(state))
 # dGcdu
 # print(pusherV.jacobian(control))
 
@@ -37,3 +37,8 @@ stc1 = Matrix([-pdot*(ft - mu*fn)])
 stc2 = Matrix([pdot*(ft + mu*fn)])
 # print(stc1.jacobian(control))
 # print(stc2.jacobian(control))
+
+test = np.array([1,2,3,4,5,6,7,8,9,10])
+print(test)
+test = np.reshape(test, (2,5), 'F')
+print(test)

@@ -108,3 +108,5 @@ print(xBar.X)
 print('control:')
 print(uBar.X)
 # print(uBar.X + controlNomi)
+
+print(tuple(uBar.X[:,0] + controlNomi[:,0]))
