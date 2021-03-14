@@ -69,7 +69,7 @@ namespace ifopt
           bounds.at(i*4) = Bounds(-10.0, 10.0);
           bounds.at(i*4 + 1) = Bounds(-1.0, 1.0);
           bounds.at(i*4 + 2) = Bounds(-3.14, 3.14);
-          bounds.at(i*4 + 3) = Bounds(-0.35, 0.35);
+          bounds.at(i*4 + 3) = Bounds(-0.50, 0.50);
         }
         bounds.at(0) = Bounds(x0[0], x0[0]);
         bounds.at(1) = Bounds(x0[1], x0[1]);

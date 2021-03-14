@@ -9,15 +9,17 @@
 #include <yaml-cpp/yaml.h>
 #include <math.h>
 #include <algorithm>
+#include <valarray>
 #include <ifopt/problem.h>
 #include <ifopt/snopt_solver.h>
+#include "gurobi_c++.h"
 #include "pusher/problem.h"
 #include "pusher/CalculateControl.h"
 
 class Control
 {
 public:
-    Control(ros::NodeHandle n) : nh(n)
+    Control(ros::NodeHandle n, GRBEnv envIn) : nh(n), env(envIn)
     {
         pusherVelPub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
         pusherMovePub = nh.advertise<geometry_msgs::Twist>("/move_pusher", 1);
@@ -36,11 +38,19 @@ public:
         muGround = params["mu_g"].as<double>();
         m = params["m"].as<double>();
         xC = -params["length"].as<double>() / 2.0;
+        width = params["width"].as<double>();
         mMax = params["mMax"].as<double>();
         fMax = muGround * m * 9.81;
         MPCSteps = params["n_step"].as<int>();
         tStep = params["t_step"].as<double>();
+        QFWeight = params["QFinal"].as<double>();
+        QWeight = params["Q"].as<double>();
+        RWeight = params["R"].as<double>();
         debugInfo = params["debug_info"].as<bool>();
+
+        QFinal[0] = 3*QFWeight; QFinal[1] = 3*QFWeight; QFinal[2] = 0.1*QFWeight; QFinal[3] = 0*QFWeight;
+        Q[0] = 3*QWeight; Q[1] = 3*QWeight; Q[2] = 0.1*QWeight; Q[3] = 0*QWeight;
+        R[0] = 1*RWeight; R[1] = 1*RWeight; R[2] = 0.01*RWeight;
 
         J.resize(2,3); 
         B.resize(3,2); 
@@ -79,6 +89,9 @@ public:
         marker.color.r = 0.0;
         marker.color.g = 0.0;
         marker.color.b = 1.0;
+
+        // Gurobi
+        // model = std::unique_ptr<GRBModel>(new GRBModel(env));
 
         // define the nominal trajectory
         float targetLV = 0.05;
@@ -139,7 +152,7 @@ public:
     }
     
     void findSolution(const ros::TimerEvent&)
-    {        
+    {   
         Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal((MPCSteps-1)*3);
 
         // straight line
@@ -155,22 +168,117 @@ public:
         //     stepCounter = 0;
         // }
         // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
+        
+        // Gurobi solver
+        GRBModel model = GRBModel(env);
+        GRBVar xBar[MPCSteps][4], uBar[MPCSteps-1][3], z[MPCSteps-1][3];
+        try{
+        // initial error
+        std::cout << sliderPose.x - stateNominal(0) << ", " << sliderPose.y - stateNominal(1) << "," << sliderPose.theta - stateNominal(2) << ", " <<phi - stateNominal(3) << "\n";
+        xBar[0][0] = model.addVar(sliderPose.x - stateNominal(0), sliderPose.x - stateNominal(0), 0, GRB_CONTINUOUS, "state[0]");
+        xBar[0][1] = model.addVar(sliderPose.y - stateNominal(1), sliderPose.y - stateNominal(1), 0, GRB_CONTINUOUS, "state[20]");
+        xBar[0][2] = model.addVar(sliderPose.theta - stateNominal(2), sliderPose.theta - stateNominal(2), 0, GRB_CONTINUOUS, "state[40]");
+        xBar[0][3] = model.addVar(phi - stateNominal(3), phi - stateNominal(3), 0, GRB_CONTINUOUS, "state[60]");
 
-        pusher::CalculateControl srv;
-        std::vector<double> stateNomiSrv(stateNominal.data(), stateNominal.data()+MPCSteps*4);
-        std::vector<double> controlNomiSrv(controlNominal.data(), controlNominal.data()+(MPCSteps-1)*3);
-        std::vector<double> stateErrorSrv;
-        stateErrorSrv.push_back(sliderPose.x - stateNominal(0));
-        stateErrorSrv.push_back(sliderPose.y - stateNominal(1));
-        stateErrorSrv.push_back(sliderPose.theta - stateNominal(2));
-        stateErrorSrv.push_back(phi - stateNominal(3));
-        srv.request.state_nominal = stateNomiSrv;
-        srv.request.control_nominal = controlNomiSrv;
-        srv.request.state_error = stateErrorSrv;
-        Eigen::Vector3d controlNow;
-        if (calculateControlClient.call(srv)){
-            controlNow = Eigen::Vector3d::Map(srv.response.control.data(), 3);
+        for (int i = 1; i < MPCSteps; ++i){
+            xBar[i][0] = model.addVar(-GRB_INFINITY, GRB_INFINITY, 0, GRB_CONTINUOUS, "state["+std::to_string(i)+"]");
+            xBar[i][1] = model.addVar(-GRB_INFINITY, GRB_INFINITY, 0, GRB_CONTINUOUS, "state["+std::to_string(20+i)+"]");
+            xBar[i][2] = model.addVar(-GRB_INFINITY, GRB_INFINITY, 0, GRB_CONTINUOUS, "state["+std::to_string(40+i)+"]");
+            xBar[i][3] = model.addVar(-0.70 - stateNominal(4*i+3), 0.70 - stateNominal(4*i+3), 0, GRB_CONTINUOUS, "state["+std::to_string(60+i)+"]");
         }
+
+        for (int i = 0; i < MPCSteps-1; ++i){
+            uBar[i][0] = model.addVar(-controlNominal(3*i), GRB_INFINITY, 0, GRB_CONTINUOUS, "control["+std::to_string(i)+"]");
+            uBar[i][1] = model.addVar(-GRB_INFINITY, GRB_INFINITY, 0, GRB_CONTINUOUS, "control["+std::to_string(19+i)+"]");
+            uBar[i][2] = model.addVar(-GRB_INFINITY, GRB_INFINITY, 0, GRB_CONTINUOUS, "control["+std::to_string(38+i)+"]");
+            z[i][0] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "mode["+std::to_string(i)+"]");
+            z[i][1] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "mode["+std::to_string(19+i)+"]");
+            z[i][2] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "mode["+std::to_string(38+i)+"]");
+        }
+
+        // Set cost
+        GRBQuadExpr cost = 0;
+        cost.addTerms(QFinal, xBar[MPCSteps-1], xBar[MPCSteps-1], 4);
+        for (int i = 0; i < MPCSteps-1; ++i){
+            cost.addTerms(Q, xBar[i], xBar[i], 4);
+            cost.addTerms(R, uBar[i], uBar[i], 3);
+        }
+        model.setObjective(cost, GRB_MINIMIZE);
+
+        for (int i = 0; i < MPCSteps-1; ++i){
+            double fn = controlNominal(i*3);
+            double ft = controlNominal(i*3+1);
+            double pdot = controlNominal(i*3+2);
+            double theta = stateNominal(i*4+2);
+            double phi = stateNominal(i*4+3);
+            // dynamics A*xBar + B*uBar = x_k+1 - x
+            double A[] = {0, 0, -2*fn*sin(theta)/pow(fMax,2) - 2*ft*cos(theta)/pow(fMax,2), 0, 
+                          0, 0, 2*fn*cos(theta)/pow(fMax,2) - 2*ft*sin(theta)/pow(fMax,2), 0, 
+                          0, 0, 0, 2*fn*xC*(pow(tan(phi),2) + 1)/pow(mMax,2), 
+                          0, 0, 0, 0};
+            double B[] = {2*cos(theta)/pow(fMax,2), -2*sin(theta)/pow(fMax,2), 0, 
+                          2*sin(theta)/pow(fMax,2), 2*cos(theta)/pow(fMax,2), 0, 
+                          2*xC*tan(phi)/pow(mMax,2), 2*xC/pow(mMax,2), 0, 
+                          0, 0, 1};
+            for (int j = 0; j < 4; ++j){
+                GRBLinExpr dynamics = 0.0;
+                dynamics.addTerms(A+j*4, xBar[i], 4);
+                dynamics.addTerms(B+j*3, uBar[i], 3);
+                model.addConstr(dynamics == (xBar[i+1][j] - xBar[i][j]));
+            }
+            // velocity mapping, bounds the ouptut velocity; pusherV - nominal velicity at step i
+            Eigen::Vector2d pusherV;
+            Eigen::MatrixXd dVdx(2,4), dVdu(2,3);
+            pusherV << fn*(2*pow(xC,2)*pow(tan(phi),2)/pow(mMax,2) + 2/pow(fMax,2)) + 2*ft*pow(xC,2)*tan(phi)/pow(mMax,2), 
+                       2*fn*pow(xC,2)*tan(phi)/pow(mMax,2) + ft*(2*pow(xC,2)/pow(mMax,2) + 2/pow(fMax,2)) - pdot*xC/pow(cos(phi),2); 
+            dVdx << 0, 0, 0, 2*fn*pow(xC,2)*(2*pow(tan(phi),2) + 2)*tan(phi)/pow(mMax,2) + 2*ft*pow(xC,2)*(pow(tan(phi),2) + 1)/pow(mMax,2), 
+                    0, 0, 0, 2*fn*pow(xC,2)*(pow(tan(phi),2) + 1)/pow(mMax,2) - 2*pdot*xC*sin(phi)/pow(cos(phi),3);
+            dVdu << 2*pow(xC,2)*pow(tan(phi),2)/pow(mMax,2) + 2/pow(fMax,2), 2*pow(xC,2)*tan(phi)/pow(mMax,2), 0, 
+                    2*pow(xC,2)*tan(phi)/pow(mMax,2), 2*pow(xC,2)/pow(mMax,2) + 2/pow(fMax,2), -xC/pow(cos(phi),2);
+            GRBLinExpr vMappedX = pusherV(0), vMappedY = pusherV(1);
+            for (int j = 0; j < 4; ++j){
+                vMappedX += dVdx(0,j)*xBar[i][j];
+                vMappedY += dVdx(1,j)*xBar[i][j];
+            }
+            for (int j = 0; j < 3; ++j){
+                vMappedX += dVdu(0,j)*uBar[i][j];
+                vMappedY += dVdu(1,j)*uBar[i][j];
+            }
+            model.addConstr(vMappedX >= 0);
+            model.addConstr(vMappedX <= 0.3);
+            model.addConstr(vMappedY >= -0.3);
+            model.addConstr(vMappedY <= 0.3);
+            // friction cone
+            model.addConstr(ft+uBar[i][1] <= mu*(fn+uBar[i][0]));
+            model.addConstr(ft+uBar[i][1] >= -mu*(fn+uBar[i][0]));
+            // mode selection
+            double M = 1.0;
+            // stick
+            model.addConstr(pdot+uBar[i][2] >= M*(z[i][0] - 1));
+            model.addConstr(pdot+uBar[i][2] <= M*(-z[i][0] + 1));
+            // up
+            model.addConstr(pdot+uBar[i][2] >= 5*M*(z[i][1] - 1));
+            model.addConstr(mu*(fn+uBar[i][0]) - (ft+uBar[i][1]) >= M*(z[i][1]-1));
+            model.addConstr(mu*(fn+uBar[i][0]) - (ft+uBar[i][1]) <= M*(-z[i][1]+1));
+            // down
+            model.addConstr(pdot+uBar[i][2] <= 5*M*(-z[i][2] + 1));
+            model.addConstr(mu*(fn+uBar[i][0]) + (ft+uBar[i][1]) >= M*(z[i][2]-1));
+            model.addConstr(mu*(fn+uBar[i][0]) + (ft+uBar[i][1]) <= M*(-z[i][2]+1));
+            model.addConstr(z[i][0]+z[i][1]+z[i][2] == 1);
+        }
+        // model.write("/home/mzwang/qsp_ws/src/pusher/model" + std::to_string(stepCounter) + ".lp");
+        // getchar();
+        model.optimize();
+        }
+        catch(GRBException e) {
+            std::cout << "Error code = " << e.getErrorCode() << "\n";
+            std::cout << e.getMessage() << "\n";
+        }
+        Eigen::Vector3d controlNow;
+        controlNow << uBar[0][0].get(GRB_DoubleAttr_X) + controlNominal(0), 
+                      uBar[0][1].get(GRB_DoubleAttr_X) + controlNominal(1), 
+                      uBar[0][2].get(GRB_DoubleAttr_X) + controlNominal(2);
+        double mode = z[0][1].get(GRB_DoubleAttr_X)*1 + z[0][2].get(GRB_DoubleAttr_X)*2;
         
         // convert pusher velocity from slider frame to world frame
         J << 1, 0, -yC,
@@ -197,12 +305,6 @@ public:
         pusherVel.angular.x = 0;
         pusherVel.angular.y = 0;
         pusherVel.angular.z = 0;
-
-        // if not solved, reset control and state
-        int status = solver.GetReturnStatus();
-        if (status == 13){
-            control.setZero();
-        }
 
         std::cout << "---------\n";
 
@@ -235,6 +337,7 @@ public:
                        (stateNominal(5) - sliderPose.y) * (stateNominal(5) - sliderPose.y));
         std::cout << error << "\n";
         std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
+        std::cout << mode << "\n";
         std::cout << controlNow.transpose() << "\n";
         pusherMovePub.publish(pusherVel);
         ++stepCounter;
@@ -256,12 +359,15 @@ private:
 
     geometry_msgs::Pose2D sliderPose;
     geometry_msgs::Twist zeroVel;
-    double xC, yC, phi, fMax, mMax, c, mu, m, muGround;
+    double xC, yC, phi, fMax, mMax, c, mu, m, muGround, width;
+    double QFWeight, QWeight, RWeight;
     int MPCSteps, stepCounter;
     double tStep;
     double radius;
     double alphaDot;
     bool debugInfo;
+
+    double Q[4], QFinal[4], R[3];
 
     Eigen::VectorXd state, control;
     
@@ -272,14 +378,17 @@ private:
     Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
     Eigen::VectorXd lineControlNomi, eightControlNomi, snakeControlNomi;
 
-    ifopt::SnoptSolver solver;
+    GRBEnv env;
+    // std::unique_ptr<GRBModel> model;
 };
 
 main(int argc, char *argv[])
 {
     ros::init(argc, argv, "controller");
     ros::NodeHandle n("~");
-    Control control(n);
+    GRBEnv env = GRBEnv(true);
+    env.start();
+    Control control(n, env);
 
     ros::AsyncSpinner spinner(6);
     spinner.start();

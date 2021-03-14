@@ -26,17 +26,16 @@ for i in range(nStep):
     stateNomi[0, i] = targetLV*tStep*i
 controlNomi[0, :] = 0.3
 
-
 xBarLB = np.empty((4, nStep))
 xBarLB[0, :] = -GRB.INFINITY
 xBarLB[1, :] = -GRB.INFINITY
 xBarLB[2, :] = -GRB.INFINITY
-xBarLB[3, :] = -0.35 - stateNomi[3, :] # so the pusher not exceeds the slider's edge
+xBarLB[3, :] = -0.70 - stateNomi[3, :] # so the pusher not exceeds the slider's edge
 xBarUB = np.empty((4, nStep))
 xBarUB[0, :] = GRB.INFINITY
 xBarUB[1, :] = GRB.INFINITY
 xBarUB[2, :] = GRB.INFINITY
-xBarUB[3, :] = 0.35 - stateNomi[3, :]
+xBarUB[3, :] = 0.70 - stateNomi[3, :]
 uBarLB = np.empty((3, nStep-1))
 uBarLB[0, :] = -controlNomi[0, :]
 uBarLB[1, :] = -GRB.INFINITY
@@ -47,8 +46,8 @@ uBarUB[1, :] = GRB.INFINITY
 uBarUB[2, :] = GRB.INFINITY
 
 # set current error state x_bar_0
-xBarLB[:, 0] = np.array([0,0.01,0,0])
-xBarUB[:, 0] = np.array([0,0.01,0,0])
+xBarLB[:, 0] = np.array([0,0.04,0.06,-0.50])
+xBarUB[:, 0] = np.array([0,0.04,0.06,-0.50])
 
 # pusher velocity bounds
 pusherVLB = np.array([0, -0.3])
@@ -97,9 +96,8 @@ for i in range(nStep-1):
     if pdot != 0:
         gm.addConstr(np.min(-pdot, 0)*(ft-mu*fn) + H1@uBar[:,i] == 0)
         gm.addConstr(np.min(pdot, 0)*(ft+mu*fn) + H2@uBar[:,i] == 0)
-    
-gm.optimize()
 
+gm.optimize()
 gm.printQuality()
 print(gm.Status)
 print('state:')
@@ -110,3 +108,12 @@ print(uBar.X)
 # print(uBar.X + controlNomi)
 
 print(tuple(uBar.X[:,0] + controlNomi[:,0]))
+
+fn = uBar.X[0,0] + controlNomi[0,0]
+ft = uBar.X[1,0] + controlNomi[1,0]
+pdot = uBar.X[2,0] + controlNomi[2,0]
+
+pusherV = np.array([fn*(2*xC**2*np.tan(phi)**2/mMax**2 + 2/fMax**2) + 2*ft*xC**2*np.tan(phi)/mMax**2, 
+                        2*fn*xC**2*np.tan(phi)/mMax**2 + ft*(2*xC**2/mMax**2 + 2/fMax**2) - pdot*xC/np.cos(phi)**2])
+
+print(pusherV)

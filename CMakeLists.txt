@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(pusher)
 
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+option(CXX "enable C++ compilation" ON)
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
 
@@ -20,7 +22,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-
+find_package(GUROBI REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -122,6 +124,7 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${GUROBI_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -155,10 +158,33 @@ target_link_libraries(control_snopt
   yaml-cpp
 )
 
-add_executable(control_gurobi src/control_gurobi.cpp)
-add_dependencies(control_gurobi ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(control_gurobi
+add_executable(control_gurobi_client src/control_gurobi_client.cpp)
+add_dependencies(control_gurobi_client ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(control_gurobi_client
   ${catkin_LIBRARIES}
+  ## GUROBI_CXX_LIBRARY must be before GUROBI_LIBRARY
+  ${GUROBI_CXX_LIBRARY}
+  ${GUROBI_LIBRARY}
+  yaml-cpp
+)
+
+add_executable(control_gurobi_stc src/control_gurobi_stc.cpp)
+add_dependencies(control_gurobi_stc ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(control_gurobi_stc
+  ${catkin_LIBRARIES}
+  ## GUROBI_CXX_LIBRARY must be before GUROBI_LIBRARY
+  ${GUROBI_CXX_LIBRARY}
+  ${GUROBI_LIBRARY}
+  yaml-cpp
+)
+
+add_executable(control_gurobi_mip src/control_gurobi_mip.cpp)
+add_dependencies(control_gurobi_mip ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(control_gurobi_mip
+  ${catkin_LIBRARIES}
+  ## GUROBI_CXX_LIBRARY must be before GUROBI_LIBRARY
+  ${GUROBI_CXX_LIBRARY}
+  ${GUROBI_LIBRARY}
   yaml-cpp
 )
 
