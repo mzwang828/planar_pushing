@@ -91,7 +91,12 @@ public:
         marker.color.b = 1.0;
 
         // Gurobi
-        // model = std::unique_ptr<GRBModel>(new GRBModel(env));
+        uBarPre.resize(3*(MPCSteps-1));
+        uBarPre.setZero();
+        stateNominal.resize(MPCSteps*4);
+        stateNominal.setZero();
+        controlNominal.resize((MPCSteps-1)*3);
+        controlNominal.setZero();
 
         // define the nominal trajectory
         float targetLV = 0.05;
@@ -104,6 +109,7 @@ public:
         for (int i = 0; i < 10/(targetLV*tStep)-1; ++i){
             lineControlNomi.segment(i*3, 3) << 0.305, 0, 0, 0;
         }
+        controlNominal = lineControlNomi.head((MPCSteps-1)*3);
 
         // circular tracking
         radius = 0.15;
@@ -153,14 +159,13 @@ public:
     
     void findSolution(const ros::TimerEvent&)
     {   
-        Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal((MPCSteps-1)*3);
-
         // straight line
         if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
             stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
         } else {
             stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
-            controlNominal = lineControlNomi.segment(stepCounter*3, (MPCSteps-1)*3);
+            controlNominal.head(MPCSteps*3-6) = controlNominal.tail(MPCSteps*3-6);
+            controlNominal.tail(3) = lineControlNomi.segment(stepCounter*3, (MPCSteps-1)*3).tail(3);
         }
         
         // 8 shape
@@ -169,12 +174,14 @@ public:
         // }
         // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
+        // update the nominal control
+        controlNominal += uBarPre;
+        std::cout << "nominal control: " << controlNominal.transpose() << "\n";
         // Gurobi solver
         GRBModel model = GRBModel(env);
         GRBVar xBar[MPCSteps][4], uBar[MPCSteps-1][3];
         try{
         // initial error
-        std::cout << sliderPose.x - stateNominal(0) << ", " << sliderPose.y - stateNominal(1) << "," << sliderPose.theta - stateNominal(2) << ", " <<phi - stateNominal(3) << "\n";
         xBar[0][0] = model.addVar(sliderPose.x - stateNominal(0), sliderPose.x - stateNominal(0), 0, GRB_CONTINUOUS);
         xBar[0][1] = model.addVar(sliderPose.y - stateNominal(1), sliderPose.y - stateNominal(1), 0, GRB_CONTINUOUS);
         xBar[0][2] = model.addVar(sliderPose.theta - stateNominal(2), sliderPose.theta - stateNominal(2), 0, GRB_CONTINUOUS);
@@ -252,7 +259,7 @@ public:
             Eigen::Vector3d H1, H2;
             H1 << mu*pdot, -pdot, fn*mu - ft;
             H2 << mu*pdot, pdot, fn*mu + ft;
-            if (pdot != 0){
+            // if (pdot != 0){
                 GRBLinExpr slideUp = std::min(-pdot, 0.0)*(ft-mu*fn), 
                            slideDown = std::min(pdot, 0.0)*(ft+mu*fn);
                 for (int j = 0; j < 3; ++j){
@@ -261,13 +268,22 @@ public:
                 }
                 model.addConstr(slideUp == 0);
                 model.addConstr(slideDown == 0);
-            }
+            // }
         }
         model.optimize();
         }
         catch(GRBException e) {
             std::cout << "Error code = " << e.getErrorCode() << "\n";
             std::cout << e.getMessage() << "\n";
+        }
+
+        for (int i = 0; i < MPCSteps-2; ++i){
+            // uBar (MPCSteps-1) x 3
+            // only save uBars for step 1 to MPCSteps-1, but not step 0
+            // since uBar at step 0 will be execute right now
+            uBarPre(3*i) = uBar[i+1][0].get(GRB_DoubleAttr_X);
+            uBarPre(3*i+1) = uBar[i+1][1].get(GRB_DoubleAttr_X);
+            uBarPre(3*i+2) = uBar[i+1][2].get(GRB_DoubleAttr_X);
         }
         Eigen::Vector3d controlNow;
         controlNow << uBar[0][0].get(GRB_DoubleAttr_X) + controlNominal(0), 
@@ -370,6 +386,8 @@ private:
     // reference trajectory
     Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
     Eigen::VectorXd lineControlNomi, eightControlNomi, snakeControlNomi;
+    Eigen::VectorXd uBarPre;
+    Eigen::VectorXd stateNominal, controlNominal;
 
     GRBEnv env;
     // std::unique_ptr<GRBModel> model;
