@@ -7,8 +7,8 @@ width: 0.09 # along y direction
 mMax: 0.360 # numerical integrated
 
 # params for MPC
-n_step: 20
-t_step: 0.05
+n_step: 35
+t_step: 0.03
 QFinal: 2000.0
 Q: 10.0
 R: 0.5

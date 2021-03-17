@@ -7,7 +7,9 @@
 #include <visualization_msgs/Marker.h>
 
 #include <yaml-cpp/yaml.h>
+#include <fstream>
 #include <math.h>
+#include <chrono>
 #include <algorithm>
 #include <valarray>
 #include <ifopt/problem.h>
@@ -15,6 +17,7 @@
 #include "gurobi_c++.h"
 #include "pusher/problem.h"
 #include "pusher/CalculateControl.h"
+
 
 class Control
 {
@@ -91,17 +94,20 @@ public:
         marker.color.b = 1.0;
 
         // Gurobi
-        // model = std::unique_ptr<GRBModel>(new GRBModel(env));
+        stateNominal.resize(MPCSteps*4);
+        controlNominal.resize((MPCSteps-1)*3);
 
         // define the nominal trajectory
         float targetLV = 0.05;
-        lineNomi.resize(int(4*10/(targetLV*tStep))+4);
-        for (int i = 0; i < 10/(targetLV*tStep); ++i){
+        float targetLength = 0.5;
+        totalSteps = int(targetLength/(targetLV*tStep));
+        lineNomi.resize(4*totalSteps+4);
+        for (int i = 0; i < totalSteps; ++i){
             lineNomi.segment(i*4, 4) << targetLV*i*tStep, 0, 0, 0;
         }
-        lineNomi.tail(4) << 10, 0, 0, 0;
-        lineControlNomi.resize(int(3*10/(targetLV*tStep)));
-        for (int i = 0; i < 10/(targetLV*tStep)-1; ++i){
+        lineNomi.tail(4) << targetLength, 0, 0, 0;
+        lineControlNomi.resize(3*totalSteps);
+        for (int i = 0; i < totalSteps-1; ++i){
             lineControlNomi.segment(i*3, 3) << 0.305, 0, 0, 0;
         }
 
@@ -116,7 +122,19 @@ public:
             eightNomi.segment(2*4*nPointsPi + i*4, 4) << radius * sin(targetAV*i*tStep), 3*radius + radius*cos(targetAV*i*tStep), - targetAV*i*tStep, 0;
             eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
         }
-        timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
+
+
+        // for recording
+        actualState.resize(4*(totalSteps));
+        actualState.setZero();
+        solvingTime.resize(totalSteps);
+        solvingTime.setZero();
+        errors.resize(totalSteps);
+        errors.setZero();
+        timePath = "/home/mzwang/qsp_ws/src/pusher/logs/time_mip.txt";
+        errorPath = "/home/mzwang/qsp_ws/src/pusher/logs/error_mip.txt";
+
+        timer1 = nh.createTimer(ros::Duration(tStep), &Control::findSolution, this);
         // timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
     }
 
@@ -147,34 +165,52 @@ public:
 
     void pusherMoveCallback(const geometry_msgs::Twist &msg){
         pusherVelPub.publish(msg);
-        ros::Duration(0.05).sleep();
+        ros::Duration(tStep).sleep();
         pusherVelPub.publish(zeroVel);
     }
     
     void findSolution(const ros::TimerEvent&)
     {   
-        Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal((MPCSteps-1)*3);
-
         // straight line
-        if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+        if (stepCounter > totalSteps){
+            timeFile.open(timePath, std::ios::app);
+            if (timeFile.is_open()){
+                timeFile << solvingTime.transpose() <<"\n";
+            }
+            else{
+                std::cout << " WARNING: Unable to open the recording file.\n";
+            }
+            timeFile.close();
+            errorFile.open(errorPath, std::ios::app);
+            if (errorFile.is_open()){
+                errorFile << errors.transpose() <<"\n";
+            }
+            else{
+                std::cout << " WARNING: Unable to open the recording file.\n";
+            }
+            errorFile.close();
+            ros::Duration(10).sleep();
+        } else if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
             stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
         } else {
             stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
             controlNominal = lineControlNomi.segment(stepCounter*3, (MPCSteps-1)*3);
         }
-        
+
         // 8 shape
         // if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
         //     stepCounter = 0;
         // }
         // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
-        
+                
+        std::cout << sliderPose.x - stateNominal(0) << ", " << sliderPose.y - stateNominal(1) << "," << sliderPose.theta - stateNominal(2) << ", " <<phi - stateNominal(3) << "\n";
+        double error = sqrt((stateNominal(0) - sliderPose.x) * (stateNominal(0) - sliderPose.x) + 
+                       (stateNominal(1) - sliderPose.y) * (stateNominal(1) - sliderPose.y));
         // Gurobi solver
         GRBModel model = GRBModel(env);
         GRBVar xBar[MPCSteps][4], uBar[MPCSteps-1][3], z[MPCSteps-1][3];
-        try{
+
         // initial error
-        std::cout << sliderPose.x - stateNominal(0) << ", " << sliderPose.y - stateNominal(1) << "," << sliderPose.theta - stateNominal(2) << ", " <<phi - stateNominal(3) << "\n";
         xBar[0][0] = model.addVar(sliderPose.x - stateNominal(0), sliderPose.x - stateNominal(0), 0, GRB_CONTINUOUS, "state[0]");
         xBar[0][1] = model.addVar(sliderPose.y - stateNominal(1), sliderPose.y - stateNominal(1), 0, GRB_CONTINUOUS, "state[20]");
         xBar[0][2] = model.addVar(sliderPose.theta - stateNominal(2), sliderPose.theta - stateNominal(2), 0, GRB_CONTINUOUS, "state[40]");
@@ -202,6 +238,9 @@ public:
         for (int i = 0; i < MPCSteps-1; ++i){
             cost.addTerms(Q, xBar[i], xBar[i], 4);
             cost.addTerms(R, uBar[i], uBar[i], 3);
+            if (i > 0){
+                cost += 0.1*(z[i][0]-1)*(z[i][0]-1) + 0.1*z[i][1]*z[i][1]+0.1*z[i][2]*z[i][2];
+            }
         }
         model.setObjective(cost, GRB_MINIMIZE);
 
@@ -266,14 +305,33 @@ public:
             model.addConstr(mu*(fn+uBar[i][0]) + (ft+uBar[i][1]) <= M*(-z[i][2]+1));
             model.addConstr(z[i][0]+z[i][1]+z[i][2] == 1);
         }
+        // agglomerated
+        // for (int i = 1; i < 5; ++i) {
+        //     model.addConstr(z[1][0]==z[1+i][0]);
+        //     model.addConstr(z[1][1]==z[1+i][1]);
+        //     model.addConstr(z[1][2]==z[1+i][2]);
+        //     model.addConstr(z[6][0]==z[6+i][0]);
+        //     model.addConstr(z[6][1]==z[6+i][1]);
+        //     model.addConstr(z[6][2]==z[6+i][2]);
+        //     model.addConstr(z[11][0]==z[6+i][0]);
+        //     model.addConstr(z[11][1]==z[6+i][1]);
+        //     model.addConstr(z[11][2]==z[6+i][2]);
+        // }
+        // for (int i = 1; i < 4; ++i) {
+        //     model.addConstr(z[16][0]==z[6+i][0]);
+        //     model.addConstr(z[16][1]==z[6+i][1]);
+        //     model.addConstr(z[16][2]==z[6+i][2]);
+        // }
+
         // model.write("/home/mzwang/qsp_ws/src/pusher/model" + std::to_string(stepCounter) + ".lp");
         // getchar();
+        auto tStart = std::chrono::system_clock::now();
         model.optimize();
-        }
-        catch(GRBException e) {
-            std::cout << "Error code = " << e.getErrorCode() << "\n";
-            std::cout << e.getMessage() << "\n";
-        }
+        auto tEnd = std::chrono::system_clock::now();
+
+        errors[stepCounter] = error;
+        solvingTime[stepCounter] = std::chrono::duration<double>(tEnd - tStart).count();
+
         Eigen::Vector3d controlNow;
         controlNow << uBar[0][0].get(GRB_DoubleAttr_X) + controlNominal(0), 
                       uBar[0][1].get(GRB_DoubleAttr_X) + controlNominal(1), 
@@ -333,8 +391,6 @@ public:
             pathMPCPub.publish(pathMPC);
         }
 
-        double error = sqrt((stateNominal(4) - sliderPose.x) * (stateNominal(4) - sliderPose.x) + 
-                       (stateNominal(5) - sliderPose.y) * (stateNominal(5) - sliderPose.y));
         std::cout << error << "\n";
         std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
         std::cout << mode << "\n";
@@ -361,7 +417,7 @@ private:
     geometry_msgs::Twist zeroVel;
     double xC, yC, phi, fMax, mMax, c, mu, m, muGround, width;
     double QFWeight, QWeight, RWeight;
-    int MPCSteps, stepCounter;
+    int MPCSteps, stepCounter, totalSteps;
     double tStep;
     double radius;
     double alphaDot;
@@ -377,9 +433,13 @@ private:
     // reference trajectory
     Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
     Eigen::VectorXd lineControlNomi, eightControlNomi, snakeControlNomi;
+    Eigen::VectorXd stateNominal, controlNominal;
 
+    // for recording
+    Eigen::VectorXd actualState, solvingTime, errors;
+    std::ofstream timeFile, errorFile;
+    std::string timePath, errorPath;
     GRBEnv env;
-    // std::unique_ptr<GRBModel> model;
 };
 
 main(int argc, char *argv[])
@@ -389,7 +449,6 @@ main(int argc, char *argv[])
     GRBEnv env = GRBEnv(true);
     env.start();
     Control control(n, env);
-
     ros::AsyncSpinner spinner(6);
     spinner.start();
     ros::waitForShutdown();

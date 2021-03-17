@@ -47,8 +47,8 @@ uBarUB[1, :] = GRB.INFINITY
 uBarUB[2, :] = GRB.INFINITY
 
 # set current error state x_bar_0
-xBarLB[:, 0] = np.array([0,0.04,0.06,-0.50])
-xBarUB[:, 0] = np.array([0,0.04,0.06,-0.50])
+xBarLB[:, 0] = np.array([0,0.03,0,-0])
+xBarUB[:, 0] = np.array([0,0.03,0,-0])
 
 # pusher velocity bounds
 pusherVLB = np.array([0, -0.3])
@@ -110,6 +110,7 @@ for i in range(nStep-1):
 
 gm.write("py.lp")
 gm.optimize()
+print('runtime:', gm.Runtime)
 
 gm.printQuality()
 print(gm.Status)

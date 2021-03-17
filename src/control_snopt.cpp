@@ -12,6 +12,8 @@
 #include <ifopt/problem.h>
 #include <ifopt/snopt_solver.h>
 #include "pusher/problem.h"
+#include <chrono>
+#include <fstream>
 
 class Control
 {
@@ -80,11 +82,13 @@ public:
 
         // define the nominal trajectory
         float targetLV = 0.05;
-        lineNomi.resize(int(4*10/(targetLV*tStep))+4);
-        for (int i = 0; i < 10/(targetLV*tStep); ++i){
+        float targetLength = 0.5;
+        totalSteps = int(targetLength/(targetLV*tStep));        
+        lineNomi.resize(4*totalSteps+4);
+        for (int i = 0; i < totalSteps; ++i){
             lineNomi.segment(i*4, 4) << targetLV*i*tStep, 0, 0, 0;
         }
-        lineNomi.tail(4) << 10, 0, 0, 0;
+        lineNomi.tail(4) << targetLength, 0, 0, 0;
 
         // circular tracking
         radius = 0.15;
@@ -97,7 +101,18 @@ public:
             eightNomi.segment(2*4*nPointsPi + i*4, 4) << radius * sin(targetAV*i*tStep), 3*radius + radius*cos(targetAV*i*tStep), - targetAV*i*tStep, 0;
             eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
         }
-        timer1 = nh.createTimer(ros::Duration(0.05), &Control::findSolution, this);
+
+        // for recording
+        actualState.resize(4*(totalSteps));
+        actualState.setZero();
+        solvingTime.resize(totalSteps);
+        solvingTime.setZero();
+        errors.resize(totalSteps);
+        errors.setZero();
+        timePath = "/home/mzwang/qsp_ws/src/pusher/logs/time_stc.txt";
+        errorPath = "/home/mzwang/qsp_ws/src/pusher/logs/error_stc.txt";
+
+        timer1 = nh.createTimer(ros::Duration(tStep), &Control::findSolution, this);
         // timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
     }
 
@@ -128,7 +143,7 @@ public:
 
     void pusherMoveCallback(const geometry_msgs::Twist &msg){
         pusherVelPub.publish(msg);
-        ros::Duration(0.05).sleep();
+        ros::Duration(tStep).sleep();
         pusherVelPub.publish(zeroVel);
     }
     
@@ -138,11 +153,29 @@ public:
         Eigen::VectorXd stateNominal(MPCSteps*4), controlNominal((MPCSteps-1)*3);
 
         for (int i = 0; i < MPCSteps-1; ++i){
-            controlNominal.segment(i*3, 3) << 0,0,0;
+            controlNominal.segment(i*3, 3) << 0.305,0,0;
         }
 
         // straight line
-        if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+        if (stepCounter > totalSteps){
+            timeFile.open(timePath, std::ios::app);
+            if (timeFile.is_open()){
+                timeFile << solvingTime.transpose() <<"\n";
+            }
+            else{
+                std::cout << " WARNING: Unable to open the recording file.\n";
+            }
+            timeFile.close();
+            errorFile.open(errorPath, std::ios::app);
+            if (errorFile.is_open()){
+                errorFile << errors.transpose() <<"\n";
+            }
+            else{
+                std::cout << " WARNING: Unable to open the recording file.\n";
+            }
+            errorFile.close();
+            ros::Duration(10).sleep();
+        } else if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
             stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
         } else {
             stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
@@ -153,6 +186,10 @@ public:
         // }
         // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
+
+        double error = sqrt((stateNominal(0) - sliderPose.x) * (stateNominal(0) - sliderPose.x) + 
+                       (stateNominal(1) - sliderPose.y) * (stateNominal(1) - sliderPose.y));
+
         // stateNominal.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
         state.head(4) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
 
@@ -162,10 +199,14 @@ public:
         nlp.AddConstraintSet(std::make_shared<ifopt::ExConstraint>(10*(MPCSteps-1)));
         nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, control));
 
+        auto tStart = std::chrono::system_clock::now();
         solver.Solve(nlp);
+        auto tEnd = std::chrono::system_clock::now();
 
-        Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
+        errors[stepCounter] = error;
+        solvingTime[stepCounter] = std::chrono::duration<double>(tEnd - tStart).count();
         
+        Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
         state.head(4 * MPCSteps - 4) = variables.segment(4, 4 * MPCSteps-4);
         state.tail(4) = variables.segment(4 * MPCSteps-4, 4);
         control.head(3 * MPCSteps - 6) = variables.segment(4 * MPCSteps+3, 3 * MPCSteps-6);
@@ -233,8 +274,6 @@ public:
             pathMPCPub.publish(pathMPC);
         }
 
-        double error = sqrt((stateNominal(4) - sliderPose.x) * (stateNominal(4) - sliderPose.x) + 
-                       (stateNominal(5) - sliderPose.y) * (stateNominal(5) - sliderPose.y));
         std::cout << error << "\n";
         std::cout << vPusher(0) << ", " << vPusher(1) << "\n";
         std::cout << controlNow.transpose() << "\n";
@@ -258,7 +297,7 @@ private:
     geometry_msgs::Pose2D sliderPose;
     geometry_msgs::Twist zeroVel;
     double xC, yC, phi, fMax, mMax, c, mu, m, muGround;
-    int MPCSteps, stepCounter;
+    int MPCSteps, stepCounter, totalSteps;
     double tStep;
     double radius;
     double alphaDot;
@@ -271,6 +310,11 @@ private:
 
     // reference trajectory
     Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
+
+    // for recording
+    Eigen::VectorXd actualState, solvingTime, errors;
+    std::ofstream timeFile, errorFile;
+    std::string timePath, errorPath;
 
     ifopt::SnoptSolver solver;
 };

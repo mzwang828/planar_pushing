@@ -35,9 +35,12 @@ int main()
     // initValues.segment(i*4, 4) << 0.15 * sin(0.2*i*tStep), 0.15 - 0.15*cos(0.2*i*tStep), 0.2*i*tStep, 0;
   }
   controlNominal.setZero();
+  for (int i = 0; i < n_step-1; ++i){
+    controlNominal.segment(i*3, 3) << 0.305, 0, 0;
+  }
   // stateNominal.tail(4) << 0.15 * sin(0.2*n_step*tStep), 0.15 - 0.15*cos(0.2*n_step*tStep), 0.2*n_step*tStep, 0;
 
-  initValues.head(4) << 0, 0.0, 0, 0;
+  initValues.head(4) << 0, 0.03, 0, 0;
 
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initValues));
   nlp.AddVariableSet(std::make_shared<ExVariables>(3*(n_step-1), "control", controlNominal));

@@ -1,3 +1,4 @@
 .vscode/*
 print_file.out
 src/.vscode/*
+logs/*
