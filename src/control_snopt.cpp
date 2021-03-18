@@ -92,7 +92,7 @@ public:
 
         // circular tracking
         radius = 0.15;
-        float targetAV = 0.2;
+        float targetAV = 0.3;
         int nPointsPi = 3.14/(targetAV*tStep);     
         totalSteps = nPointsPi*4 - MPCSteps + 1;
         eightNomi.resize(nPointsPi*4*4);
@@ -229,7 +229,7 @@ public:
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(3*(MPCSteps-1), "control", control));
         nlp.AddConstraintSet(std::make_shared<ifopt::ExConstraint>(10*(MPCSteps-1)));
-        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, controlNominal));
+        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, control));
 
         auto tStart = std::chrono::system_clock::now();
         solver.Solve(nlp);

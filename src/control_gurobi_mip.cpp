@@ -95,7 +95,11 @@ public:
 
         // Gurobi
         stateNominal.resize(MPCSteps*4);
+        stateNominal.setZero();
         controlNominal.resize((MPCSteps-1)*3);
+        controlNominal.setZero();
+        uBarPre.resize(3*(MPCSteps-1));
+        uBarPre.setZero();
 
         // define the nominal trajectory
         float targetLV = 0.05;
@@ -238,6 +242,7 @@ public:
         std::cout << sliderPose.x - stateNominal(0) << ", " << sliderPose.y - stateNominal(1) << "," << sliderPose.theta - stateNominal(2) << ", " <<phi - stateNominal(3) << "\n";
         double error = sqrt((stateNominal(0) - sliderPose.x) * (stateNominal(0) - sliderPose.x) + 
                        (stateNominal(1) - sliderPose.y) * (stateNominal(1) - sliderPose.y));
+        // controlNominal += uBarPre;
         // Gurobi solver
         GRBModel model = GRBModel(env);
         GRBVar xBar[MPCSteps][4], uBar[MPCSteps-1][3], z[MPCSteps-1][3];
@@ -374,6 +379,15 @@ public:
         solvingTime[circleCount * totalSteps + stepCounter] = std::chrono::duration<double>(tEnd - tStart).count();
         actualState.col(circleCount * totalSteps + stepCounter) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
 
+        for (int i = 0; i < MPCSteps-2; ++i){
+            // uBar (MPCSteps-1) x 3
+            // only save uBars for step 1 to MPCSteps-1, but not step 0
+            // since uBar at step 0 will be execute right now
+            uBarPre(3*i) = uBar[i+1][0].get(GRB_DoubleAttr_X);
+            uBarPre(3*i+1) = uBar[i+1][1].get(GRB_DoubleAttr_X);
+            uBarPre(3*i+2) = uBar[i+1][2].get(GRB_DoubleAttr_X);
+        }
+
         Eigen::Vector3d controlNow;
         controlNow << uBar[0][0].get(GRB_DoubleAttr_X) + controlNominal(0), 
                       uBar[0][1].get(GRB_DoubleAttr_X) + controlNominal(1), 
@@ -476,7 +490,7 @@ private:
     Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
     Eigen::VectorXd lineControlNomi, eightControlNomi, snakeControlNomi;
     Eigen::VectorXd stateNominal, controlNominal;
-
+    Eigen::VectorXd uBarPre;
     // for recording
     Eigen::VectorXd solvingTime, errors;
     Eigen::MatrixXd actualState;

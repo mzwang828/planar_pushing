@@ -1,10 +1,10 @@
 # params for the slider
-mu: 0.60
+mu: 0.35
 mu_g: 0.35
 m: 1.05
 length: 0.09 # along x direction 
 width: 0.09 # along y direction
-mMax: 0.360 # numerical integrated
+mMax: 0.210 # numerical integrated
 
 # params for MPC
 n_step: 35
