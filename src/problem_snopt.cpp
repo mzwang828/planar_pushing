@@ -13,6 +13,8 @@ int main()
   int n_step = params["n_step"].as<int>();         // number of steps
   double tStep = params["t_step"].as<double>();
 
+
+  // control for 8 shape
   // float radius = 0.15;
   // float targetAV = 0.2;
   // int nPointsPi = 3.14/(targetAV*tStep);      
@@ -24,7 +26,9 @@ int main()
   //     eightNomi.segment(2*4*nPointsPi + i*4, 4) << radius * sin(targetAV*i*tStep), 3*radius + radius*cos(targetAV*i*tStep), - targetAV*i*tStep, 0;
   //     eightNomi.segment(3*4*nPointsPi + i*4, 4) << -radius * sin(targetAV*i*tStep), radius + radius*cos(targetAV*i*tStep), -3.14 + targetAV*i*tStep, 0;
   // }
+  // n_step = nPointsPi * 4;
 
+  
   Problem nlp;
   Eigen::VectorXd initValues(n_step * 4);
   initValues.setZero();
@@ -41,7 +45,6 @@ int main()
   // stateNominal.tail(4) << 0.15 * sin(0.2*n_step*tStep), 0.15 - 0.15*cos(0.2*n_step*tStep), 0.2*n_step*tStep, 0;
 
   initValues.head(4) << 0, 0.03, 0, 0;
-
   nlp.AddVariableSet(std::make_shared<ExVariables>(4*n_step, "state", initValues));
   nlp.AddVariableSet(std::make_shared<ExVariables>(3*(n_step-1), "control", controlNominal));
   nlp.AddConstraintSet(std::make_shared<ExConstraint>(10*(n_step-1)));

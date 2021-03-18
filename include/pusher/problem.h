@@ -302,7 +302,7 @@ namespace ifopt
           // // up
           tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i - 1), std::min(-pdot, 0.0) * mu));
           tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i - 1) + 1, -std::min(-pdot, 0.0)));
-          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i - 1) + 2, -pdot < 0.0 ? (control(3 * (i - 1) + 1) - mu * control(3 * (i - 1))) : 0));
+          tripletControl.push_back(T(4 * (nStep - 1) + i - 1, 3 * (i - 1) + 2, pdot > 0.0 ? (control(3 * (i - 1) + 1) - mu * control(3 * (i - 1))) : 0));
           // // down
           tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * (i - 1), -std::min(pdot, 0.0) * mu));
           tripletControl.push_back(T(5 * (nStep - 1) + i - 1, 3 * (i - 1) + 1, -std::min(pdot, 0.0)));

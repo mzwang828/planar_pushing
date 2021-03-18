@@ -81,19 +81,20 @@ public:
         marker.color.b = 1.0;
 
         // define the nominal trajectory
-        float targetLV = 0.05;
-        float targetLength = 0.5;
-        totalSteps = int(targetLength/(targetLV*tStep));        
-        lineNomi.resize(4*totalSteps+4);
-        for (int i = 0; i < totalSteps; ++i){
-            lineNomi.segment(i*4, 4) << targetLV*i*tStep, 0, 0, 0;
-        }
-        lineNomi.tail(4) << targetLength, 0, 0, 0;
+        // float targetLV = 0.05;
+        // float targetLength = 0.5;
+        // totalSteps = int(targetLength/(targetLV*tStep));        
+        // lineNomi.resize(4*totalSteps+4);
+        // for (int i = 0; i < totalSteps; ++i){
+        //     lineNomi.segment(i*4, 4) << targetLV*i*tStep, 0, 0, 0;
+        // }
+        // lineNomi.tail(4) << targetLength, 0, 0, 0;
 
         // circular tracking
         radius = 0.15;
         float targetAV = 0.2;
-        int nPointsPi = 3.14/(targetAV*tStep);        
+        int nPointsPi = 3.14/(targetAV*tStep);     
+        totalSteps = nPointsPi*4 - MPCSteps + 1;
         eightNomi.resize(nPointsPi*4*4);
         for (int i = 0; i < nPointsPi; ++i){
             eightNomi.segment(i*4, 4) << radius * sin(targetAV*i*tStep), radius - radius*cos(targetAV*i*tStep), targetAV*i*tStep, 0;
@@ -103,14 +104,16 @@ public:
         }
 
         // for recording
-        actualState.resize(4*(totalSteps));
-        actualState.setZero();
-        solvingTime.resize(totalSteps);
-        solvingTime.setZero();
-        errors.resize(totalSteps);
-        errors.setZero();
         timePath = "/home/mzwang/qsp_ws/src/pusher/logs/time_stc.txt";
         errorPath = "/home/mzwang/qsp_ws/src/pusher/logs/error_stc.txt";
+        xyPath = "/home/mzwang/qsp_ws/src/pusher/logs/xy_stc.txt";
+        circleCount = 0;
+        solvingTime.resize(totalSteps*5);
+        errors.resize(totalSteps*5);
+        actualState.resize(4, totalSteps*5);
+        solvingTime.setZero();
+        errors.setZero();
+        actualState.setZero();
 
         timer1 = nh.createTimer(ros::Duration(tStep), &Control::findSolution, this);
         // timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
@@ -157,34 +160,63 @@ public:
         }
 
         // straight line
-        if (stepCounter > totalSteps){
-            timeFile.open(timePath, std::ios::app);
-            if (timeFile.is_open()){
-                timeFile << solvingTime.transpose() <<"\n";
-            }
-            else{
-                std::cout << " WARNING: Unable to open the recording file.\n";
-            }
-            timeFile.close();
-            errorFile.open(errorPath, std::ios::app);
-            if (errorFile.is_open()){
-                errorFile << errors.transpose() <<"\n";
-            }
-            else{
-                std::cout << " WARNING: Unable to open the recording file.\n";
-            }
-            errorFile.close();
-            ros::Duration(10).sleep();
-        } else if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
-            stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
-        } else {
-            stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
-        }
-        // 8 shape
-        // if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
-        //     stepCounter = 0;
+        // if (stepCounter > totalSteps){
+        //     timeFile.open(timePath, std::ios::app);
+        //     if (timeFile.is_open()){
+        //         timeFile << solvingTime.transpose() <<"\n";
+        //     }
+        //     else{
+        //         std::cout << " WARNING: Unable to open the recording file.\n";
+        //     }
+        //     timeFile.close();
+        //     errorFile.open(errorPath, std::ios::app);
+        //     if (errorFile.is_open()){
+        //         errorFile << errors.transpose() <<"\n";
+        //     }
+        //     else{
+        //         std::cout << " WARNING: Unable to open the recording file.\n";
+        //     }
+        //     errorFile.close();
+        //     ros::Duration(10).sleep();
+        // } else if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
+        //     stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
+        // } else {
+        //     stateNominal = lineNomi.segment(stepCounter*4, MPCSteps*4);
         // }
-        // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
+        // 8 shape
+        if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
+            stepCounter = 0;
+            ++circleCount;
+            if (circleCount == 5){
+                file.open(timePath, std::ios::app);
+                if (file.is_open()){
+                    file << solvingTime.transpose() <<"\n";
+                }
+                else{
+                    std::cout << " WARNING: Unable to open the recording file.\n";
+                }
+                file.close();
+                file.open(errorPath, std::ios::app);
+                if (file.is_open()){
+                    file << errors.transpose() <<"\n";
+                }
+                else{
+                    std::cout << " WARNING: Unable to open the recording file.\n";
+                }
+                file.close();
+                file.open(xyPath, std::ios::app);
+                if (file.is_open()){
+                    file << actualState <<"\n";
+                }
+                else{
+                    std::cout << " WARNING: Unable to open the recording file.\n";
+                }
+                file.close();
+                std::cout << "--------------Recorded!----------------\n";
+                ros::shutdown();
+            }
+        }
+        stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
 
         double error = sqrt((stateNominal(0) - sliderPose.x) * (stateNominal(0) - sliderPose.x) + 
@@ -197,14 +229,15 @@ public:
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(4*MPCSteps, "state", state));
         nlp.AddVariableSet(std::make_shared<ifopt::ExVariables>(3*(MPCSteps-1), "control", control));
         nlp.AddConstraintSet(std::make_shared<ifopt::ExConstraint>(10*(MPCSteps-1)));
-        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, control));
+        nlp.AddCostSet(std::make_shared<ifopt::ExCost>("cost", stateNominal, controlNominal));
 
         auto tStart = std::chrono::system_clock::now();
         solver.Solve(nlp);
         auto tEnd = std::chrono::system_clock::now();
 
-        errors[stepCounter] = error;
-        solvingTime[stepCounter] = std::chrono::duration<double>(tEnd - tStart).count();
+        errors[circleCount * totalSteps + stepCounter] = error;
+        solvingTime[circleCount * totalSteps + stepCounter] = std::chrono::duration<double>(tEnd - tStart).count();
+        actualState.col(circleCount * totalSteps + stepCounter) = state.head(4);
         
         Eigen::VectorXd variables = nlp.GetOptVariables()->GetValues();
         state.head(4 * MPCSteps - 4) = variables.segment(4, 4 * MPCSteps-4);
@@ -309,12 +342,14 @@ private:
     Eigen::MatrixXd J, L, B;
 
     // reference trajectory
-    Eigen::VectorXd lineNomi, eightNomi, snakeNomi;
+    Eigen::VectorXd lineNomi, eightNomi;
 
     // for recording
-    Eigen::VectorXd actualState, solvingTime, errors;
-    std::ofstream timeFile, errorFile;
-    std::string timePath, errorPath;
+    Eigen::VectorXd solvingTime, errors;
+    Eigen::MatrixXd actualState;
+    std::ofstream file;
+    std::string timePath, errorPath, xyPath;
+    int circleCount;
 
     ifopt::SnoptSolver solver;
 };
