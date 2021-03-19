@@ -186,6 +186,7 @@ public:
         // 8 shape
         if (stepCounter*4+MPCSteps*4 > eightNomi.size()){
             stepCounter = 0;
+            control = controlNominal;
             ++circleCount;
             if (circleCount == 5){
                 file.open(timePath, std::ios::app);

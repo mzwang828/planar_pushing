@@ -117,7 +117,7 @@ public:
 
         // circular tracking
         radius = 0.15;
-        float targetAV = 0.2;
+        float targetAV = 0.3;
         int nPointsPi = 3.14/(targetAV*tStep);      
         totalSteps = nPointsPi*4 - MPCSteps + 1;
         eightNomi.resize(nPointsPi*4*4);
@@ -343,31 +343,31 @@ public:
             model.addConstr(z[i][0]+z[i][1]+z[i][2] == 1);
         }
         // agglomerated
-        // for (int i = 1; i < 5; ++i) {
-        //     model.addConstr(z[1][0]==z[1+i][0]);
-        //     model.addConstr(z[1][1]==z[1+i][1]);
-        //     model.addConstr(z[1][2]==z[1+i][2]);
-        //     model.addConstr(z[6][0]==z[6+i][0]);
-        //     model.addConstr(z[6][1]==z[6+i][1]);
-        //     model.addConstr(z[6][2]==z[6+i][2]);
-        //     model.addConstr(z[11][0]==z[11+i][0]);
-        //     model.addConstr(z[11][1]==z[11+i][1]);
-        //     model.addConstr(z[11][2]==z[11+i][2]);
-        //     model.addConstr(z[16][0]==z[16+i][0]);
-        //     model.addConstr(z[16][1]==z[16+i][1]);
-        //     model.addConstr(z[16][2]==z[16+i][2]);
-        //     model.addConstr(z[21][0]==z[21+i][0]);
-        //     model.addConstr(z[21][1]==z[21+i][1]);
-        //     model.addConstr(z[21][2]==z[21+i][2]);
-        //     model.addConstr(z[26][0]==z[26+i][0]);
-        //     model.addConstr(z[26][1]==z[26+i][1]);
-        //     model.addConstr(z[26][2]==z[26+i][2]);
-        // }
-        // for (int i = 1; i < 3; ++i) {
-        //     model.addConstr(z[31][0]==z[31+i][0]);
-        //     model.addConstr(z[31][1]==z[31+i][1]);
-        //     model.addConstr(z[31][2]==z[31+i][2]);
-        // }
+        for (int i = 1; i < 5; ++i) {
+            model.addConstr(z[1][0]==z[1+i][0]);
+            model.addConstr(z[1][1]==z[1+i][1]);
+            model.addConstr(z[1][2]==z[1+i][2]);
+            model.addConstr(z[6][0]==z[6+i][0]);
+            model.addConstr(z[6][1]==z[6+i][1]);
+            model.addConstr(z[6][2]==z[6+i][2]);
+            model.addConstr(z[11][0]==z[11+i][0]);
+            model.addConstr(z[11][1]==z[11+i][1]);
+            model.addConstr(z[11][2]==z[11+i][2]);
+            model.addConstr(z[16][0]==z[16+i][0]);
+            model.addConstr(z[16][1]==z[16+i][1]);
+            model.addConstr(z[16][2]==z[16+i][2]);
+            model.addConstr(z[21][0]==z[21+i][0]);
+            model.addConstr(z[21][1]==z[21+i][1]);
+            model.addConstr(z[21][2]==z[21+i][2]);
+            model.addConstr(z[26][0]==z[26+i][0]);
+            model.addConstr(z[26][1]==z[26+i][1]);
+            model.addConstr(z[26][2]==z[26+i][2]);
+        }
+        for (int i = 1; i < 3; ++i) {
+            model.addConstr(z[31][0]==z[31+i][0]);
+            model.addConstr(z[31][1]==z[31+i][1]);
+            model.addConstr(z[31][2]==z[31+i][2]);
+        }
 
         // model.write("/home/mzwang/qsp_ws/src/pusher/model" + std::to_string(stepCounter) + ".lp");
         // getchar();
