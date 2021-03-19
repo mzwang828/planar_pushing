@@ -175,7 +175,7 @@ public:
         // stateNominal = eightNomi.segment(stepCounter*4, MPCSteps*4);
         
         // update the nominal control
-        controlNominal += uBarPre;
+        // controlNominal += uBarPre;
         std::cout << "nominal control: " << controlNominal.transpose() << "\n";
         // Gurobi solver
         GRBModel model = GRBModel(env);

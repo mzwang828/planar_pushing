@@ -2,7 +2,7 @@ import numpy as np
 import yaml
 from pathlib import Path
 
-n = 10
+n = 100
 
 # random perturbed initials for [x,y,theta,phi] in range +_[0.03, 0.03, 0.4, 0.5]
 random_inits = np.random.rand(n,4)
