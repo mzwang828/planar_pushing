@@ -259,16 +259,19 @@ public:
             Eigen::Vector3d H1, H2;
             H1 << mu*pdot, -pdot, fn*mu - ft;
             H2 << mu*pdot, pdot, fn*mu + ft;
-            // if (pdot != 0){
-                GRBLinExpr slideUp = std::min(-pdot, 0.0)*(ft-mu*fn), 
-                           slideDown = std::min(pdot, 0.0)*(ft+mu*fn);
+            if (pdot < 0){
+                GRBLinExpr slideDown = std::min(pdot, 0.0)*(ft+mu*fn);
                 for (int j = 0; j < 3; ++j){
-                    slideUp += H1(j)*uBar[i][j];
                     slideDown += H2(j)*uBar[i][j];
                 }
-                model.addConstr(slideUp == 0);
                 model.addConstr(slideDown == 0);
-            // }
+            } else if (pdot > 0){
+                GRBLinExpr slideUp = std::min(-pdot, 0.0)*(ft-mu*fn);
+                for (int j = 0; j < 3; ++j){
+                    slideUp += H1(j)*uBar[i][j];
+                }
+                model.addConstr(slideUp == 0);
+            }
         }
         model.optimize();
         }

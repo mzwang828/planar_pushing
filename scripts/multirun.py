@@ -18,7 +18,7 @@ reset_world = rospy.ServiceProxy('/gazebo/reset_world', Empty)
 count = 1
 
 pkg = 'pusher'
-executable = 'control_gurobi_mip'
+executable = 'control_snopt'
 node = roslaunch.core.Node(pkg,executable)
 launch = roslaunch.scriptapi.ROSLaunch()
 launch.start()

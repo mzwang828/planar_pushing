@@ -189,7 +189,7 @@ public:
                 std::cout << " WARNING: Unable to open the recording file.\n";
             }
             errorFile.close();
-            ros::Duration(10).sleep();
+            ros::shutdown();
         } else if (stepCounter*4+MPCSteps*4 > lineNomi.size()){
             stateNominal.head(MPCSteps*4 - 4) = stateNominal.tail(MPCSteps*4 - 4);
         } else {
