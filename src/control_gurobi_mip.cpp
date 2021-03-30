@@ -132,13 +132,16 @@ public:
         timePath = "/home/mzwang/qsp_ws/src/pusher/logs/time_mip.txt";
         errorPath = "/home/mzwang/qsp_ws/src/pusher/logs/error_mip.txt";
         xyPath = "/home/mzwang/qsp_ws/src/pusher/logs/xy_mip.txt";
+        pusherPath = "/home/mzwang/qsp_ws/src/pusher/logs/pusher_mip.txt";
         circleCount = 0;
         solvingTime.resize(totalSteps*5);
         errors.resize(totalSteps*5);
         actualState.resize(4, totalSteps*5);
+        pusherState.resize(totalSteps*5);
         solvingTime.setZero();
         errors.setZero();
         actualState.setZero();
+        pusherState.setZero();
 
         timer1 = nh.createTimer(ros::Duration(tStep), &Control::findSolution, this);
         // timerVel = nh.createTimer(ros::Duration(0.01), &Control::pubPusherVel, this);
@@ -227,6 +230,14 @@ public:
                 file.open(xyPath, std::ios::app);
                 if (file.is_open()){
                     file << actualState <<"\n";
+                }
+                else{
+                    std::cout << " WARNING: Unable to open the recording file.\n";
+                }
+                file.close();
+                file.open(pusherPath, std::ios::app);
+                if (file.is_open()){
+                    file << pusherState.transpose() <<"\n";
                 }
                 else{
                     std::cout << " WARNING: Unable to open the recording file.\n";
@@ -377,6 +388,7 @@ public:
 
         errors[circleCount * totalSteps + stepCounter] = error;
         solvingTime[circleCount * totalSteps + stepCounter] = std::chrono::duration<double>(tEnd - tStart).count();
+        pusherState[circleCount * totalSteps + stepCounter] = yC;
         actualState.col(circleCount * totalSteps + stepCounter) << sliderPose.x, sliderPose.y, sliderPose.theta, phi;
 
         for (int i = 0; i < MPCSteps-2; ++i){
@@ -492,10 +504,10 @@ private:
     Eigen::VectorXd stateNominal, controlNominal;
     Eigen::VectorXd uBarPre;
     // for recording
-    Eigen::VectorXd solvingTime, errors;
+    Eigen::VectorXd solvingTime, errors, pusherState;
     Eigen::MatrixXd actualState;
     std::ofstream file;
-    std::string timePath, errorPath, xyPath;
+    std::string timePath, errorPath, xyPath, pusherPath;
     int circleCount;
 
     GRBEnv env;
